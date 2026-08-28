@@ -1,0 +1,17 @@
+# Minimal dependencies to run the scripts in src/, in addition to the
+# repository-root conda environment files (environment-minimal.yml /
+# environment-full.yml / environment-explicit.txt), which were captured
+# from the original HPC environment and are broader than what this
+# specific pipeline needs. Install with:
+#   pip install -r requirements.txt
+# or fold these into your own conda/venv environment.
+
+pandas>=1.5
+numpy>=1.23
+scipy>=1.9
+statsmodels>=0.14
+matplotlib>=3.6
+openpyxl>=3.0        # required by pandas to read .xlsx inputs
+pyarrow>=10.0         # required by pandas to read/write .parquet intermediate files
+scikit-learn>=1.1     # used by consolidate_icd_datasets.py
+forestplot>=0.4.0     # used by generate_figure4_forest_plots.py
