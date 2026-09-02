@@ -195,6 +195,34 @@ etc. `ncfrp_manuscript_v5.py` module constants (47–54) and `preprocess_NCFRP.p
 48, 801–802) assume a fixed CWD. M1's corrected scripts take every path as a CLI arg.
 Fix: parameterize via `argparse`; strip the `/Volumes/...` paths from the captions.
 
+### A1.8 `main()` chdir's into `--outdir` before reading inputs — **DONE (2026-09-02, first HPC run)**
+Found on the first real run of `run_all.sh`. `ncfrp_manuscript_v5.py::main` does
+`os.chdir(args.outdir)` (so all figure/CSV writes land under `out_joint/` /
+`out_marginal/`), but several **input** reads then run with paths that are still
+relative to the original working directory, so they resolve against `out_joint/`
+and raise `FileNotFoundError` even though the file plainly exists in the work dir:
+- `--data-path standardized/NCFRP_SCH_LR_BW_pop.csv` (arg, `load_ncfrp_data`)
+- `--exposure-dir output_data/risk_exposure` (arg, used at step 5 modelling)
+- `get_total_births_denominator` default `standardized/consolidated/denominator.parquet`
+- the six `load_exposure` / `load_joint_exposure` pickles (via `load_pickle`),
+  reached from the descriptive-rate path with the module default `EXPOSURE_DIR`,
+  which is bound at def-time so it cannot be fixed by reassigning the global.
+
+Same class as A1.7 (CWD-bound paths), surfaced by the `chdir` added in the pass-1
+rewrite. Step 4 (`pca_boundary_report_ncfrp.py`) read the same file with the same
+relative path one second earlier and worked, because that script never chdir's.
+
+Fix (in `ncfrp_manuscript_v5.py`, `py_compile`-clean; only file touched):
+capture `ORIG_CWD = Path.cwd()` at module load and again in `main()` immediately
+before the `chdir`; `.resolve()` `args.data_path` and `args.exposure_dir` before
+the `chdir`; and in the two low-level readers `load_pickle` and
+`get_total_births_denominator`, rebase a non-absolute path as `ORIG_CWD / path`.
+Every input read in the script now resolves against the launch dir; the one
+remaining relative read (`pd.read_csv(irr_csv)` in the forest-plot path) is the
+script's own output under `--outdir` and is meant to stay relative. Only
+`ncfrp_manuscript_v5.py` has an `os.chdir`; the step-6 scripts build paths from
+`args.outdir` / `args.workdir` and never chdir, so they were unaffected.
+
 ---
 
 ## A2 — Case selection and preprocessing

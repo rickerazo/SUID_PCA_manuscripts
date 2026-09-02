@@ -97,6 +97,10 @@ pd.set_option("display.max_columns", 200)
 # Global settings (CLI-overridable in main())
 # -----------------------------------------------------------------------------
 
+# Directory the process was launched from, captured before main() chdir's into
+# --outdir. Input trees (standardized/...) are relative to this, not to --outdir.
+ORIG_CWD = Path.cwd()
+
 DATA_PATH = Path("standardized/NCFRP_SCH_LR_BW_pop.csv")
 EXPOSURE_DIR = Path("output_data/risk_exposure")
 FIG_DIR = Path("output_figures/ncfrp")
@@ -178,7 +182,10 @@ def ensure_dirs() -> None:
 
 
 def load_pickle(path: Path):
-    with open(path, "rb") as f:
+    path = Path(path)
+    if not path.is_absolute():
+        path = ORIG_CWD / path       # exposure inputs live under the launch dir,
+    with open(path, "rb") as f:      # not under --outdir (main() chdir's there)
         return pickle.load(f)
 
 
@@ -611,6 +618,9 @@ def smooth_rate_table(rate_df: pd.DataFrame, xvar: str, window: int = 3,
 
 def get_total_births_denominator(
         path: str = "standardized/consolidated/denominator.parquet") -> int:
+    path = Path(path)
+    if not path.is_absolute():
+        path = ORIG_CWD / path       # relative to the launch dir, not --outdir
     den = pd.read_parquet(path)
     if "combgest" in den.columns:
         den = den.copy()
@@ -1102,6 +1112,14 @@ def build_argparser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_argparser().parse_args(argv)
+
+    # Resolve input paths to absolute BEFORE the chdir below. Otherwise relative
+    # paths (CLI args and the denominator default) are silently reinterpreted
+    # against --outdir once we cd into it.
+    global ORIG_CWD
+    ORIG_CWD = Path.cwd()
+    args.data_path = args.data_path.resolve()
+    args.exposure_dir = args.exposure_dir.resolve()
 
     if args.outdir != Path("."):
         args.outdir.mkdir(parents=True, exist_ok=True)
