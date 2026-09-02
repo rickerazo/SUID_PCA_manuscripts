@@ -1,0 +1,24 @@
+# Minimal dependencies to run the scripts in src/, in addition to the
+# repository-root conda environment files (environment-minimal.yml /
+# environment-full.yml / environment-explicit.txt).
+#
+# AUDIT A1.3: the repo-root environment-minimal.yml is named "py310" but pins
+# python==3.8.12, and does not list forestplot / pyreadstat / openpyxl / seaborn
+# even though the scripts import them. This file lists what the manuscript-2
+# pipeline actually imports. Record the exact Python version and `pip freeze`
+# from the final run in RUN_MANIFEST.md.
+#
+# Install:  pip install -r requirements.txt
+# Python:   3.8-3.11 (the scripts use `from __future__ import annotations` so the
+#           X | None type hints work on 3.8+; tested for syntax on 3.9).
+
+pandas>=1.5
+numpy>=1.23
+scipy>=1.9
+statsmodels>=0.14        # discrete.NegativeBinomial, gam.GLMGam + BSplines
+matplotlib>=3.6
+forestplot>=0.4.0        # Figure 4 forest plots (ncfrp_manuscript_v5.py)
+pyreadstat>=1.2          # read the raw NCFRP .sav (preprocess_NCFRP.py)
+openpyxl>=3.0            # read the NCFRP codebook / Ed's ICD .xlsx (preprocess_NCFRP.py)
+seaborn>=0.12            # imported by preprocess_NCFRP.py
+pyarrow>=10.0            # read standardized/consolidated/denominator.parquet

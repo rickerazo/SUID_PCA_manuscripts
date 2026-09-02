@@ -1,0 +1,183 @@
+# Manuscript 2 pipeline - runbook (HPC)
+
+The data are not in the repo. Run this on the HPC where the raw NCFRP `.sav`,
+the codebook, PRAMS, and the CDC live-birth denominators live. Every step writes
+into `output_data/` and `output_figures/` under the working directory you pass as
+`--outdir`.
+
+See `AUDIT_FINDINGS.md` for why each step is shaped the way it is. Items still
+needing a decision or a codebook lookup are called out inline as **[CHECK]**.
+
+## 0. Get the code onto the HPC (scp, not git)
+
+From the machine that has the audit clone:
+
+```
+scp -r ~/Projects/SUID_PCA_manuscripts/manuscript_2_bedsharing_pca \
+    <user>@<hpc>:<work_dir>/
+```
+
+`<work_dir>` on the HPC must also contain:
+
+```
+data/SeattleChildrensNCFRP.sav
+data/Codebook_Version5-1_031122.xlsx
+from_Ed/Eds_ICD_codes.xlsx
+standardized/consolidated/denominator.parquet     # or set $DENOM
+standardized/PRAMS/prams.parquet                   # or set $PRAMS
+```
+
+Run everything below from `<work_dir>` so the relative paths resolve. `scp` the
+`output_data/` + `output_figures/` + `RUN_MANIFEST.md` back afterwards.
+
+## 0b. Environment
+
+```
+python -m venv .venv && source .venv/bin/activate      # or a conda env
+pip install -r manuscript_2_bedsharing_pca/requirements.txt
+python -c "import sys,platform; print(platform.python_version())" > RUN_MANIFEST.md
+pip freeze >> RUN_MANIFEST.md
+```
+
+## 1. Synthetic smoke test (no real data)
+
+```
+python manuscript_2_bedsharing_pca/tests/smoke_synthetic.py
+```
+
+Fabricates a tiny NCFRP-shaped CSV + exposure pickles + denominator parquet,
+runs `ncfrp_manuscript_v5.main()` end to end, and asserts the audit trail
+reconciles and every expected output file is written. Run this first after any
+code change.
+
+## 2. State of the "missing" pieces (resolved 2026-09-02)
+
+- **`selection`**: recovered as `src/selection.py` (column-name lists only, no
+  case filter). `preprocess_NCFRP.py` no longer imports it.
+- **`LR_BW` step**: recovered as `src/lr_bw_impute.py` (birthweight imputation
+  `INF3biwt ~ INF3gestage + INFsex`). It only fills the birthweight column; the
+  incidence models do not use birthweight, so running the analysis on the
+  preprocess output directly gives identical model results. Kept for Table 1.
+- **Case definition**: no cause-of-death filter exists anywhere in the pipeline.
+  `SeattleChildrensNCFRP.sav` IS the case series (an NCFRP fatality-review
+  export). **[CHECK] G6:** confirm how that export was scoped - SIDS-classified
+  deaths, SUID, or all NCFRP infant deaths - and set the title/abstract/Methods
+  wording to match.
+- **`denominator.parquet` / `prams.parquet`**: still HPC-only. Built by
+  manuscript 1's `../manuscript_1_sex_pca/src/{format_standardization,concat_files}.py`.
+
+## 3. Codebook checks (T1 resolved; a few HPC confirmations remain)
+
+Resolved from `Codebook_Version5-1_031122.xlsx` (applied to the code):
+`INF3gestage` / `INFage` default to blank -> unknown is MISSING, not a sentinel;
+`CIRsleepplace 9 = Carseat`, `99 = Unknown`; `INFagecat` 1..5 =
+Years/Months/Days/Hours/Minutes; `INF3*tricig` is the cigarette count (so the
+smoking trigger is `> 0`, plus the `*tricigunk` flags).
+
+Still confirm on the HPC after the first run:
+- `inf3gestunk` survives into `NCFRP_SCH_LR_BW_pop.csv` (the loader drops
+  `inf3gestunk == 1` if present);
+- `Smoker` code 9 is the only "missing" code for `INF3smbefpreg` /
+  `INF3smanytime`;
+- the case-selection audit CSV's excluded counts are plausible.
+
+## 4. Preprocess the raw NCFRP file
+
+```
+cd <work_dir>          # must contain data/SeattleChildrensNCFRP.sav,
+                       # data/Codebook_Version5-1_031122.xlsx, from_Ed/Eds_ICD_codes.xlsx
+python <repo>/manuscript_2_bedsharing_pca/src/preprocess_NCFRP.py
+# -> data/NCFRP_SCH_sample.csv (2008-2019), data/NCFRP_SCH_pop.csv (all years) - index=False
+
+python <repo>/manuscript_2_bedsharing_pca/src/lr_bw_impute.py \
+    --in data/NCFRP_SCH_pop.csv --out standardized/NCFRP_SCH_LR_BW_pop.csv
+```
+
+`ncfrp_manuscript_v5.py` re-applies the 2008-2019 death-year window itself
+(`--year-min` / `--year-max`) if the file carries `infdodyear`, so it does not
+matter whether you feed it the `sample` or `pop` base file.
+
+## 5. Build the population exposure offsets (G2)
+
+```
+python <repo>/manuscript_2_bedsharing_pca/src/risk_exposure_joint.py \
+    --denominator standardized/consolidated/denominator.parquet \
+    --prams       standardized/PRAMS/prams.parquet \
+    --outdir      output_data/risk_exposure
+```
+
+Writes `joint_smoke_preterm_exposure.pkl` (the 2x2 joint P(smoke, preterm) from
+CDC live births), the four marginal `*_exposure.pkl` (for the `--offset-mode
+marginal` sensitivity run), `*.csv` copies, and `joint_exposure_summary.txt`
+(with the smoke x preterm OR / phi). Reuses manuscript 1's `compute_exposure` /
+`compute_preterm` / `compute_bed_share`. Bed sharing stays a marginal from PRAMS
+(assumed independent of {smoke, preterm}; state this).
+
+## 6. Choose the PCA window from the data (AUDIT A3.17 / R1.3)
+
+```
+python <repo>/manuscript_2_bedsharing_pca/src/pca_boundary_report_ncfrp.py \
+    --data-path standardized/NCFRP_SCH_LR_BW_pop.csv \
+    --outdir output_data/ncfrp/pca_boundary \
+    --min-cell 5 --pca-min 36 --pca-max 90
+```
+
+Read `pca_boundary_diagnostics.txt` and `pca_weekly_counts.csv`. Pick
+`pca_min` / `pca_max` as the widest contiguous run of weeks with no sparse
+subgroup (bed-share / non-bed-share / male / female each >= `min-cell`). Do not
+assume 75.
+
+## 7. Main analysis
+
+```
+# primary: joint smoke x preterm offsets
+python <repo>/manuscript_2_bedsharing_pca/src/ncfrp_manuscript_v5.py \
+    --data-path standardized/NCFRP_SCH_LR_BW_pop.csv \
+    --exposure-dir output_data/risk_exposure \
+    --pca-min <from step 6> --pca-max <from step 6> \
+    --offset-mode joint \
+    --min-count 10 \
+    --gam-alpha-grid 20 \
+    --outdir out_joint
+
+# sensitivity: the archived product-of-marginals offsets
+python <repo>/manuscript_2_bedsharing_pca/src/ncfrp_manuscript_v5.py \
+    ... --offset-mode marginal --outdir out_marginal
+```
+
+`run_all.sh` does steps 0-8 in order (analysis + Table 1 + Figure 1 flow +
+time-axis comparison).
+
+Writes, per run (ALL / FEMALES / MALES):
+
+- `output_data/ncfrp_flow_audit.csv` - the CONSORT case-selection trail (A9).
+- `output_data/ncfrp/two_population_Ns.csv` - full / early / late / peak-excluded N (A3.18).
+- `output_data/ncfrp/{run}_early_irr.csv`, `{run}_late_irr.csv`,
+  `{run}_gam_exp.csv`, `{run}_gam_bedshareXpca_exp.csv` - coefficient tables,
+  each checked so every CI brackets its estimate (A4.30). Figure 4 reads these.
+- `output_data/ncfrp/{run}_{early,late}_summary.txt` - full model summaries.
+- `output_data/ncfrp/smoke_bedshare_case_cooccurrence.{csv,txt}` - the case-only
+  chi-square, labelled as co-occurrence not risk (A3.24).
+- `output_figures/ncfrp/Figure2_{run}.{png,tiff}`, `Figure4_{run}.{png,tiff}`,
+  `output_figures/ncfrp/gam/Figure3_{run}.{png,tiff}`.
+
+## 8. Manuscript-support outputs (run after step 7; run_all.sh does this)
+
+- `src/generate_table1.py` -> `output_data/ncfrp/table1_by_bedshare.{csv,md}`.
+  "Characteristics of the analytic SUID cohort by bed-sharing status", counts +
+  column %, on the pre-peak-split cohort (AUDIT A4.29 / R1.8 / Ed E14). Sex is a
+  row; birthweight uses the LR_BW-imputed column.
+- `src/generate_figure1_flow.py` -> `output_figures/ncfrp/Figure1_flow.{png,tiff}`
+  and `output_data/ncfrp/figure1_flow.txt`. CONSORT flow straight from
+  `ncfrp_flow_audit.csv` + `two_population_Ns.csv`, so every count reconciles and
+  the two analytic populations are shown explicitly (AUDIT A4.28 / R1.4 / Ed E4).
+- `src/compare_time_axes.py` -> `output_data/ncfrp/time_axes/`: `gam_fit_comparison.csv`
+  (PCA vs chronological-age GAM deviance/AIC/llf), `observed_by_axis.{png,tiff}`,
+  `pca_vs_chronological_{scatter.png,correlation.txt}`,
+  `proportion_preterm_{by_pca_week,by_chronological_week}.csv` +
+  `proportion_preterm_by_age.png` (AUDIT A6.40-42, A3.26, Ed E8/E9/E13/E15).
+
+## 9. Hand back
+
+Copy `output_data/`, `output_figures/`, and `RUN_MANIFEST.md` back for review
+against `AUDIT_FINDINGS.md` and for the reviewer-proofing memo.

@@ -62,12 +62,15 @@ plt.rcParams['font.size']=17
 # for x in df.columns.tolist(): print(x)
 
 ########### functions used multiple times:
-import selection
+# AUDIT A1.1: `import selection` was here but the module is not in the repo and
+# nothing in this file references it. If the SIDS/SUID case restriction lived in
+# that module, it is currently missing from the committed pipeline (there is no
+# ICD/cause-of-death filter active in this script - the Eds_Code/W75 blocks below
+# are all commented out). Recover `selection` from the HPC or make the case
+# definition explicit here. Import removed so this script is at least importable.
 
 def select_sample(tab):
-	date_min=2000
-	date_max=2019
-
+	# AUDIT A2.16: keep only NCFRP death years 2008-2019 (state this in Methods).
 	_max = tab.index[tab['INFdodyear']<=2019]
 	dt = tab.iloc[_max]
 	_min = dt.index[dt['INFdodyear']>=2008]
@@ -98,13 +101,24 @@ df.loc[df.index[df['INFsex']==0], 'INFsex'] = 9
 df.loc[df.index[df['INF3multbirth']!=1], 'INF3multbirth']=2
 ############################# ## Infant birthweight
 
-df.loc[df[df['INFagecat']==2].index, 'age_decoder'] = 30.	#### estimate infant age in days, if the  data is in months: multiply by 30.
-df.loc[df[df['INFagecat']==3].index, 'age_decoder'] = 1.	#### if data is already encoded in days, pass number 1 for multiplication.
+# AUDIT A2.13b (codebook T1): INFagecat is the unit of INFage
+#   1 = Years, 2 = Months, 3 = Days, 4 = Hours, 5 = Minutes; 0 = blank.
+# The archived code only decoded 2 and 3, so INFagecat == 1 (an infant coded in
+# whole years) was dropped as missing age, and hours/minutes were dropped too
+# (those are first-hour deaths, excluded downstream anyway, but decode them so
+# the flow numbers are honest). Blank (0) stays undecoded -> NaN -> dropped.
+_age_unit = {1: 365.0, 2: 30.0, 3: 1.0, 4: 1.0 / 24.0, 5: 1.0 / (24.0 * 60.0)}
+df['age_decoder'] = df['INFagecat'].map(_age_unit)
 
-df['INFageDays'] = df['INFage'].astype(int)*df['age_decoder']	## actually compute the infants' ages
+df['INFageDays'] = df['INFage'] * df['age_decoder']	## infant age in days (NaN if unit unknown)
 
 
-df.loc[np.nonzero(df['INFageDays']<30)[0], 'INFageMonths'] = 0
+# AUDIT A2.12: was df.loc[np.nonzero(...)[0], ...] (positional indices used as
+# labels; only correct on a clean RangeIndex). Use a boolean mask instead.
+# AUDIT A2.13: this first assignment is immediately overwritten by the <360 line
+# below and re-applied by the <30 line at the end of the cascade; kept for
+# faithfulness, but the cascade should really be a single pd.cut.
+df.loc[df['INFageDays']<30, 'INFageMonths'] = 0
 df.loc[df['INFageDays']<360, 'INFageMonths'] = 11
 df.loc[df['INFageDays']<330, 'INFageMonths'] = 10
 df.loc[df['INFageDays']<300, 'INFageMonths'] = 9
@@ -223,30 +237,37 @@ Categorise non-smoker if No at any time if not defined as a smoker,
 otherwise categorise as Unknown. I think that will be the best we can do.
 
 '''
-df.loc[df.index[df['INF3firsttricig']>1], 'INF3smanytime'] = 1
-df.loc[df.index[df['INF3sectricig']>1], 'INF3smanytime'] = 1
-df.loc[df.index[df['INF3thirdtricig']>1], 'INF3smanytime'] = 1
+# AUDIT A2.14c (codebook T1): INF3*tricig is the NUMBER of cigarettes (blank when
+# not applicable / unknown), so ANY recorded cigarette (> 0) means smoking - the
+# old '> 1' missed mothers who reported exactly one cigarette. The paired
+# INF3*tricigunk == 1 flag means "smoked that trimester, quantity unknown" and
+# also indicates smoking. Both are folded in here.
+for _tri in ("first", "sec", "third"):
+	_n = df[f"INF3{_tri}tricig"]
+	_unk = df.get(f"INF3{_tri}tricigunk")
+	_smoked = (_n > 0)
+	if _unk is not None:
+		_smoked = _smoked | (_unk == 1)
+	df.loc[_smoked, "INF3smanytime"] = 1
 
-df['Smoker']=1
-for i in df.index:
-	subject=df.iloc[i]
-	if subject['INF3smbefpreg']==9 and subject['INF3smanytime']==9: df.loc[i, 'Smoker']=9
-	if subject['INF3smbefpreg']==9 and subject['INF3smanytime']==2: df.loc[i, 'Smoker']=2
+# AUDIT A2.12 / A2.14: the per-row loop below used df.iloc[i] with a label i
+# (only correct on a clean RangeIndex). Vectorized to the equivalent truth table:
+#   Smoker = 1 if (smoked before pregnancy == 1) OR (smoked any time == 1)
+#          = 2 elif (before == 2) OR (any time == 2)
+#          = 9 otherwise  [was: 1 otherwise]
+# AUDIT A2.14b: the original defaulted Smoker=1 and only overrode the nine
+# explicit {1,2,9}x{1,2,9} combinations, so any UNHANDLED combination (a NaN or
+# an out-of-range code in either field) was silently classified as SMOKER. The
+# vectorized version defaults unhandled combinations to 9 (unknown), which is
+# then excluded downstream. Confirm the field codes against the codebook.
+smoker = pd.Series(9, index=df.index, dtype='int64')
+smoker[(df['INF3smbefpreg'] == 2) | (df['INF3smanytime'] == 2)] = 2
+smoker[(df['INF3smbefpreg'] == 1) | (df['INF3smanytime'] == 1)] = 1
+df['Smoker'] = smoker
 
-	if subject['INF3smbefpreg']==2 and subject['INF3smanytime']==9: df.loc[i, 'Smoker']=2
-	if subject['INF3smbefpreg']==2 and subject['INF3smanytime']==2: df.loc[i, 'Smoker']=2
-	
-	if subject['INF3smbefpreg']==9 and subject['INF3smanytime']==1: df.loc[i, 'Smoker']=1
-	if subject['INF3smbefpreg']==2 and subject['INF3smanytime']==1: df.loc[i, 'Smoker']=1
-
-	if subject['INF3smbefpreg']==1 and subject['INF3smanytime']==1: df.loc[i, 'Smoker']=1
-	if subject['INF3smbefpreg']==1 and subject['INF3smanytime']==2: df.loc[i, 'Smoker']=1
-	if subject['INF3smbefpreg']==1 and subject['INF3smanytime']==9: df.loc[i, 'Smoker']=1
-
-
-c1 = df.iloc[df.index[df['INF3smbefpreg']==1]]
-c2 = df.iloc[df.index[df['INF3smbefpreg']==2]]
-c9 = df.iloc[df.index[df['INF3smbefpreg']==9]]
+c1 = df.loc[df.index[df['INF3smbefpreg']==1]]
+c2 = df.loc[df.index[df['INF3smbefpreg']==2]]
+c9 = df.loc[df.index[df['INF3smbefpreg']==9]]
 
 print('c1')
 print(len(c1.index[c1['INF3smanytime']==1]))
@@ -368,36 +389,23 @@ df.loc[caregiver21, 'caregiver'] = 1
 # blank = df.iloc[df.index[df['GIV1drugabuse']==9]]
 # df.loc[blank.index[blank['GIV2drugabuse']==9], 'GIVs_drugs'] = 9
 
-df['GIVs_drugs']=9
-for idx in df.index:
-	row=df.iloc[idx]
-	##1
-	if row['GIV1drugabuse']==1:
-		df.loc[idx, 'GIVs_drugs']=1
-	##2
-	if row['GIV2drugabuse']==1:
-		df.loc[idx, 'GIVs_drugs']=1
-	##3
-	if row['GIV1drugabuse']==2:
-		if row['GIV2drugabuse']==2:
-			df.loc[idx, 'GIVs_drugs']=2
-		if row['GIV2drugabuse']==9:
-			df.loc[idx, 'GIVs_drugs']=2
-	if row['GIV2drugabuse']==2:
-		if row['GIV1drugabuse']==9:
-			df.loc[idx, 'GIVs_drugs']=2
-	
+# AUDIT A2.12: was a per-row loop using df.iloc[idx] with a label idx. Vectorized
+# to the same rules: default 9; -> 2 if one caregiver is "no" (2) and the other
+# is "no" or "unknown"; -> 1 if either caregiver is "yes" (1). (This caregiver
+# drug-use variable is not used by the current analysis pipeline.)
+g1, g2 = df['GIV1drugabuse'], df['GIV2drugabuse']
+df['GIVs_drugs'] = 9
+df.loc[((g1 == 2) & (g2.isin([2, 9]))) | ((g2 == 2) & (g1.isin([2, 9]))), 'GIVs_drugs'] = 2
+df.loc[(g1 == 1) | (g2 == 1), 'GIVs_drugs'] = 1
+
 
 
 ### education
 df.loc[df.index[df['GIV1educt']==9], 'GIV1educt']=0
 df.loc[df.index[df['GIV2educt']==9], 'GIV2educt']=0
-df['GIVs_edu']=9
-
-for idx in df.index:
-	row=df.iloc[idx]
-	parent_edu_score = np.array([row['GIV1educt'],row['GIV2educt']])
-	df.loc[idx, 'GIVs_edu']=parent_edu_score.max()
+# AUDIT A2.12: per-row loop (df.iloc[idx] with a label) replaced by a vectorized
+# row-wise max of the two caregivers' education codes.
+df['GIVs_edu'] = df[['GIV1educt', 'GIV2educt']].max(axis=1)
 
 
 # df.loc[df.index[df['GIV1educt']==1], 'GIVs_edu'] = 1
@@ -672,29 +680,25 @@ print('\n1:\n',df['Bed_sharing'].value_counts(),t1['Bed_sharing'].value_counts()
 # 			j+=1
 ####### current output: j=0; correction not needed. But implemented to certify that Bed_sharing=1 never gets reassigned.
 #4
-df['CIR_cosleep']='?'
-df.loc[df.index[df['CIRsleepplace']==1], 'CIR_cosleep'] = 'solitary'
-df.loc[df.index[df['CIRsleepplace']==2], 'CIR_cosleep'] = 'solitary'
-df.loc[df.index[df['CIRsleepplace']==5], 'CIR_cosleep'] = 'solitary'
-df.loc[df.index[df['CIRsleepplace']==9], 'CIR_cosleep'] = 'solitary'
-df.loc[df.index[df['CIRsleepplace']==10], 'CIR_cosleep'] = 'solitary'
-df.loc[df.index[df['CIRsleepplace']==13], 'CIR_cosleep'] = 'solitary'
-df.loc[df.index[df['CIRsleepplace']==14], 'CIR_cosleep'] = 'solitary'
-df.loc[df.index[df['CIRsleepplace']==15], 'CIR_cosleep'] = 'solitary'
-df.loc[df.index[df['CIRsleepplace']==16], 'CIR_cosleep'] = 'solitary'
-df.loc[df.index[df['CIRsleepplace']==17], 'CIR_cosleep'] = 'solitary'
+# AUDIT A2.11 (codebook T1): reclassify UNKNOWN bed sharing (Bed_sharing == 9) to
+# NON-bed-sharing (2) when the incident sleep-place field is a single-occupant
+# device where surface-sharing is structurally implausible. Per the codebook the
+# UNKNOWN sleep-place code is 99 (correctly NOT in this set); code 9 is "Carseat"
+# and DOES belong here (an earlier revision of this audit wrongly removed it).
+# The set deliberately EXCLUDES codes where bed-sharing is plausible: 3 adult bed,
+# 4 waterbed, 6 couch, 7 chair, 8 floor, 11 other, 12 futon, plus 0/99 unknown.
+# This reclassification is still directional (unknown Bed_sharing only ever moves
+# toward non-exposed); ncfrp_manuscript_v5.py should also run a sensitivity
+# analysis that leaves Bed_sharing == 9 as missing.
+SOLITARY_SLEEPPLACE_CODES = [1, 2, 5, 9, 10, 13, 14, 15, 16, 17]
+df['CIR_cosleep'] = '?'
+df.loc[df['CIRsleepplace'].isin(SOLITARY_SLEEPPLACE_CODES), 'CIR_cosleep'] = 'solitary'
 
-k=0
-#items from 4
-z=[]
-for i in df.index:
-	row=df.iloc[i]
-	if row['Bed_sharing']==9:
-		if row['CIR_cosleep']=='solitary':
-			df.loc[i,'Bed_sharing']=2
-			k+=1
-			if row['INFdodyear']>2014:
-				z.append(i)
+# AUDIT A2.12: per-row loop (df.iloc[i] with a label) replaced by a boolean mask.
+_reclass_mask = (df['Bed_sharing'] == 9) & (df['CIR_cosleep'] == 'solitary')
+k = int(_reclass_mask.sum())
+df.loc[_reclass_mask, 'Bed_sharing'] = 2
+z = df.index[_reclass_mask & (df['INFdodyear'] > 2014)].tolist()
 t4=select_sample(df)
 print('4:',df['Bed_sharing'].value_counts(),t4['Bed_sharing'].value_counts(),'\n')
 
@@ -724,7 +728,7 @@ print('4:',df['Bed_sharing'].value_counts(),t4['Bed_sharing'].value_counts(),'\n
 
 # x_ = df.iloc[x]
 # y_ = df.iloc[y]
-z_ = df.iloc[z]
+z_ = df.loc[z]   # AUDIT A2.12: z now holds labels, not positions
 # print('What was corrected:\nFrom 2:')
 # print(y_['CIRsamesurf'].value_counts())
 # print('From 3:')
@@ -798,8 +802,12 @@ tab = df.copy()
 tab=select_sample(tab)
 print('\nFinal tables:',tab['CIRsamesurf'].value_counts(),'\n',tab['Bed_sharing'].value_counts())
 ##
-tab.to_csv('data/NCFRP_SCH_sample.csv')
-df.to_csv('data/NCFRP_SCH_pop.csv')
+# AUDIT A2.15: index=False so the analysis loader does not have to strip an
+# unnamed index column.
+import os as _os
+_os.makedirs('data', exist_ok=True)
+tab.to_csv('data/NCFRP_SCH_sample.csv', index=False)
+df.to_csv('data/NCFRP_SCH_pop.csv', index=False)
 
 
 
