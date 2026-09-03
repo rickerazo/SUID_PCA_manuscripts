@@ -175,11 +175,10 @@ Writes, per run (ALL / FEMALES / MALES):
 - **LBW / NONLBW runs** - the full two-stage pipeline over `inf3biwt < 2500` vs
   `>= 2500`, exactly like FEMALES / MALES. `{lbw,nonlbw}_{early,late}_irr.csv`,
   `{lbw,nonlbw}_gam_exp.csv`, `Figure{2,3,4}_{LBW,NONLBW}.*`. Bed-sharing IRR is
-  read across the two strata (no population LBW denominator - state this).
-- **SENS_NO_MONTH_AGE run** - the pipeline re-fit after dropping records whose
-  age was reported in whole months (`infagecat == 2`).
-  `sens_no_month_age_{early,late}_irr.csv` - should match the primary IRRs within
-  CI (anti-periodicity robustness).
+  read across the two strata (no population LBW denominator - state this). The
+  **LBW late window (~1k cases) is too thin for the 7-term NB** (alpha collapses,
+  the CI-bracket check fails, no `lbw_late_irr.csv`); use the interaction model
+  below for the late-window birthweight question.
 - **Smoking-stratified windows** (`run_windowed_stratified`) ->
   `output_data/ncfrp/stratified/smoke{0,1}_{early,late}_irr.csv` +
   `output_figures/ncfrp/Figure5_smoke_stratified.{png,tiff}`. Reduced design
@@ -218,9 +217,13 @@ Writes, per run (ALL / FEMALES / MALES):
   `time_axes/reporting_artifact/`: `periodogram_{pca,chrono}.{csv,png}`,
   `acf_{pca,chrono}.csv`, `spikes_by_age_unit.{csv,md,png}`,
   `reporting_artifact_summary.txt` - the affirmative check that the repeating
-  local peaks are age-in-months reporting granularity (~4.3 wk), confined to
-  `infagecat == 2` records, not a biological rhythm. Pairs with the
-  `sens_no_month_age_*` runs for the Methods paragraph.
+  local peaks fall exactly on the completed-week images of whole-month ages
+  (weeks {4,8,12,17,21,25,30,34,38,42,47} under preprocess's 30-day month),
+  with unequal 4-5 wk gaps (calendar arithmetic, not a fixed biological period),
+  essentially all in `infagecat == 2` records and absent from days-reported
+  ones. ~91% of NCFRP ages are months-reported so there is no "drop and re-fit"
+  sensitivity; the summary notes the windowed >=4-wk aggregation + NB dispersion
+  + GAM smoothing as why it does not touch the inference.
 
 ## 9. Hand back
 

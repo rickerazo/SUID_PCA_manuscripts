@@ -1383,10 +1383,10 @@ def main(argv: list[str] | None = None) -> int:
         if "lbw_bin" in df.columns and not df["lbw_bin"].isna().all():
             extra["LBW"] = df.loc[df["lbw_bin"] == 1].copy()
             extra["NONLBW"] = df.loc[df["lbw_bin"] == 0].copy()
-        if "infagecat" in df.columns:
-            # anti-periodicity sensitivity: drop records whose age was reported in
-            # whole months (infagecat == 2), the source of the 4/8/12-week spikes
-            extra["SENS_NO_MONTH_AGE"] = df.loc[df["infagecat"] != 2].copy()
+        # (a months-age sensitivity run is not viable here: ~91% of NCFRP infant
+        #  ages are reported in whole months, so dropping infagecat == 2 leaves
+        #  too few cases to fit the windowed models. The reporting-artifact
+        #  attribution in compare_time_axes.py carries this instead.)
         for label, sub in extra.items():
             try:
                 # gam_alpha_grid=0 for the supplementary strata: they do not need

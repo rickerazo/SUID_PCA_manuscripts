@@ -75,9 +75,11 @@ def reporting_artifact_analysis(df: pd.DataFrame, outdir) -> None:
     """
     Pre-empt a reviewer reading the repeating local peaks as a biological rhythm.
     Shows the only spectral structure is at the age-in-months reporting
-    granularity (~4.3 wk), that it is confined to records whose age was reported
-    in months (infagecat == 2), and (elsewhere) that the windowed IRRs are
-    unchanged when those records are dropped (sens_no_month_age_* runs).
+    granularity (~4.3 wk) and that it is confined to records whose age was
+    reported in months (infagecat == 2). (~91% of NCFRP infant ages are
+    months-reported, so a "drop those records and re-fit" sensitivity is not
+    viable - the argument rests on the attribution here plus the windowed
+    aggregation / NB dispersion / GAM smoothing noted in the summary.)
     """
     art = Path(outdir) / "reporting_artifact"
     art.mkdir(parents=True, exist_ok=True)
@@ -164,11 +166,16 @@ def reporting_artifact_analysis(df: pd.DataFrame, outdir) -> None:
                      "attribution skipped; state this in Methods.")
 
     lines += ["",
-              "Conclusion: no biological periodicity. The ~4.3-week structure is "
-              "the granularity of age-in-months reporting, it is concentrated in "
-              "records coded infagecat == 2, and it does not affect the count-based "
-              "NB / GAM models (raw integer counts, overdispersion modelled). The "
-              "sens_no_month_age_* windowed runs re-fit with those records removed."]
+              "Conclusion: no biological periodicity. The spikes fall exactly on "
+              "the completed-week images of whole-month ages under preprocess's "
+              f"30-day month, i.e. weeks {WHOLE_MONTH_WEEKS}; the gaps between them "
+              "(4,4,4,5,4,4,5,... weeks) are calendar arithmetic, not a fixed "
+              "biological period. They are essentially all in the months-reported "
+              "subset (infagecat == 2) and absent from the days-reported subset. "
+              "They do not affect the inference: the windowed NB models aggregate "
+              "into >=4-week windows where the sub-window structure cancels, the "
+              "NB dispersion parameter absorbs the residual over-dispersion, and "
+              "the GAM smooth averages over it."]
     (art / "reporting_artifact_summary.txt").write_text("\n".join(lines) + "\n")
     LOG.info("Wrote reporting-artifact outputs to %s", art)
 
