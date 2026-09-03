@@ -165,13 +165,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--pca-min", type=int, default=36)
     p.add_argument("--pca-max", type=int, default=90)
     p.add_argument("--tail-pct", type=float, default=1.5)
+    p.add_argument("--year-min", type=int, default=None,
+                   help="restrict to death years >= this before diagnosing the window")
+    p.add_argument("--year-max", type=int, default=None)
     args = p.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(message)s",
                         datefmt="%H:%M:%S")
 
     # everything except the PCA window
-    pre_window, _ = load_ncfrp_data(args.data_path, apply_window=False, audit_csv=None)
+    pre_window, _ = load_ncfrp_data(args.data_path, apply_window=False, audit_csv=None,
+                                    year_min=args.year_min, year_max=args.year_max)
     pca_boundary_report(pre_window, args.outdir, pca_min=args.pca_min,
                         pca_max=args.pca_max, min_cell=args.min_cell,
                         tail_pct=args.tail_pct)

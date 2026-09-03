@@ -123,6 +123,11 @@ PEAK2 = 47             # late window is PEAK2 <= PCA <= peak3
 YEAR_MIN = None
 YEAR_MAX = None
 FIRST_WEEK_CUT = 1     # exclude infageweeks <= FIRST_WEEK_CUT (matches M1's infage<=1). G5 pending.
+# Display-only centred moving-average windows for Figure 2 (A3.21/G4: the NB and
+# GAM models are always fit on raw integer counts; smoothing is visualization
+# only). Set from --smooth-window-pna / --smooth-window-pca in main().
+SMOOTH_WINDOW_PNA = 12
+SMOOTH_WINDOW_PCA = 5
 # T1 (codebook): NCFRP INF3gestage "defaults to blank" - unknown gestational age
 # is MISSING (NaN), not a numeric sentinel, and is dropped by the notna() step.
 # GESTAGE_MAX is just an implausible-value guard (no human gestation is 99 weeks;
@@ -283,6 +288,10 @@ def load_ncfrp_data(
     # 0b. restrict to the NCFRP death-year window (T3: preprocess's select_sample
     # applied 2008-2019; the standardized file may or may not already be
     # restricted, so do it explicitly and audibly here if the column is present).
+    if (year_min is None) != (year_max is None):
+        LOG.warning("Only one of year_min/year_max given (min=%s, max=%s); the "
+                    "death-year restriction needs BOTH and is being SKIPPED - the "
+                    "cohort is NOT year-restricted.", year_min, year_max)
     if year_min is not None and year_max is not None and "infdodyear" in df.columns:
         df = df.loc[df["infdodyear"].between(year_min, year_max)].copy()
         trail.record(f"0b. restrict to death years {year_min}-{year_max}", df)
@@ -363,6 +372,16 @@ def load_ncfrp_data(
     # preterm (all survivors now have a valid, non-sentinel gestational age)
     df["preterm"] = np.where(df["inf3gestage"] < 37, "Y", "N")
     df["preterm_bin"] = (df["preterm"] == "Y").astype(int)
+
+    # low birthweight (<2500 g) for the birthweight-stratified / interaction
+    # analyses (lab action item 1). inf3biwt is the LR_BW-imputed column, present
+    # only when the pipeline is fed standardized/NCFRP_SCH_LR_BW_pop.csv. NOT a
+    # covariate in the primary models; NOT in keep_cols, so it never drops a row.
+    if "inf3biwt" in df.columns:
+        _bw = pd.to_numeric(df["inf3biwt"], errors="coerce")
+        df["lbw_bin"] = (_bw < 2500).astype(float)
+        df.loc[_bw.isna(), "lbw_bin"] = np.nan
+        df["lbw"] = df["lbw_bin"].map({1.0: "Y", 0.0: "N"})
 
     # 14. final safeguard
     keep_cols = ["pca", "infageweeks", "inf3gestage", "cig_rec", "smoke",
@@ -659,32 +678,41 @@ def build_observed_rate_table(case_df: pd.DataFrame, week_var: str,
 
 def plot_incidence_curves_pna_pca(case_df: pd.DataFrame, title: str,
                                   total_births: int | None = None,
-                                  rate_scale: float = 100000.0) -> None:
+                                  rate_scale: float = 100000.0, *,
+                                  smooth_window_pna: int | None = None,
+                                  smooth_window_pca: int | None = None) -> None:
     """
     Figure 2: A. weekly incidence by postnatal age; B. by postconceptional age.
     Ed E7: panels A and B share a y-axis range; trend prose stays out of the
     figure (goes in the manuscript text).
+
+    A3.21/G4 + lab feedback on reporting noise: the solid line is a centred
+    moving average for VISUALISATION ONLY (windows below); the faint dots are the
+    raw weekly values. All modelling uses the raw integer counts.
     """
     FIG_DIR.mkdir(parents=True, exist_ok=True)
     if total_births is None:
         total_births = get_total_births_denominator()
+    w_pna = SMOOTH_WINDOW_PNA if smooth_window_pna is None else smooth_window_pna
+    w_pca = SMOOTH_WINDOW_PCA if smooth_window_pca is None else smooth_window_pca
 
     pna_tbl = smooth_rate_table(
         build_observed_rate_table(case_df, "infageweeks", total_births, rate_scale),
-        "infageweeks", window=12, min_periods=1, center=True)
+        "infageweeks", window=w_pna, min_periods=1, center=True)
     pca_tbl = smooth_rate_table(
         build_observed_rate_table(case_df, "pca", total_births, rate_scale),
-        "pca", window=5, min_periods=1, center=True)
+        "pca", window=w_pca, min_periods=1, center=True)
 
     fig, axes = plt.subplots(1, 2, figsize=(13, 5.5), constrained_layout=True)
+    COLORS = {"N": "tab:blue", "Y": "tab:orange"}
 
     def _panel(ax, tbl, xvar, xlabel, panel_title):
-        ns = tbl.loc[tbl["bed_share"] == "N"].sort_values(xvar)
-        bs = tbl.loc[tbl["bed_share"] == "Y"].sort_values(xvar)
-        ax.plot(ns[xvar], ns["rate"], linewidth=2.5, marker="o", markersize=4.5,
-                label="Non-bed sharing")
-        ax.plot(bs[xvar], bs["rate"], linewidth=2.5, marker="o", markersize=4.5,
-                label="Bed sharing")
+        for key, lbl in [("N", "Non-bed sharing"), ("Y", "Bed sharing")]:
+            sub = tbl.loc[tbl["bed_share"] == key].sort_values(xvar)
+            ax.plot(sub[xvar], sub["rate_raw"], linestyle="none", marker="o",
+                    markersize=3, alpha=0.22, color=COLORS[key])
+            ax.plot(sub[xvar], sub["rate"], linewidth=2.5, color=COLORS[key],
+                    label=lbl)
         ax.set_title(panel_title, fontsize=14)
         ax.set_xlabel(xlabel, fontsize=12)
         ax.spines["top"].set_visible(False)
@@ -696,12 +724,20 @@ def plot_incidence_curves_pna_pca(case_df: pd.DataFrame, title: str,
     _panel(axes[1], pca_tbl, "pca", "Postconceptional age (weeks)",
            "B. SUID incidence by PCA")
 
-    ymax = max(pna_tbl["rate"].max(), pca_tbl["rate"].max())
+    # shared y-range (Ed E7). Use the smoothed max plus a robust raw quantile so
+    # most raw dots are visible while the extreme month-reporting spikes clip.
+    ymax = max(pna_tbl["rate"].max(), pca_tbl["rate"].max(),
+               pna_tbl["rate_raw"].quantile(0.98), pca_tbl["rate_raw"].quantile(0.98))
     for ax in axes:
         ax.set_ylim(0, ymax * 1.05)
         ax.set_ylabel(f"Weekly SUID incidence per {int(rate_scale):,} live births",
                       fontsize=12)
     axes[0].legend(frameon=False, fontsize=10, loc="upper right")
+    axes[1].text(0.98, 0.02,
+                 f"line = centred moving average (A {w_pna}-wk, B {w_pca}-wk); "
+                 f"dots = raw weekly values",
+                 transform=axes[1].transAxes, ha="right", va="bottom",
+                 fontsize=7, color="0.4")
     for ax, label in zip(axes, ["A", "B"]):
         ax.text(0.02, 0.98, label, transform=ax.transAxes, va="top", ha="left",
                 fontsize=14, fontweight="bold")
@@ -788,6 +824,9 @@ def plot_nb_forest(early_irr_csv: str, late_irr_csv: str, title: str,
 
 DESIGN_COLS = ["pca", "bed_share", "smoke", "preterm",
                "bed_share:smoke", "bed_share:preterm"]
+# reduced design for smoking-stratified windows: `smoke` (and its interaction) is
+# constant within a stratum, so it is dropped (lab action items 2 & 3).
+DESIGN_COLS_NOSMOKE = ["pca", "bed_share", "preterm", "bed_share:preterm"]
 
 
 def _add_interactions(frame: pd.DataFrame) -> pd.DataFrame:
@@ -797,14 +836,16 @@ def _add_interactions(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def prepare_piecewise_data(input1: pd.DataFrame, var1: str, peak1: int, peak2: int, peak3: int):
+def prepare_piecewise_data(input1: pd.DataFrame, var1: str, peak1: int, peak2: int,
+                           peak3: int, design_cols: list[str] | None = None):
+    design_cols = DESIGN_COLS if design_cols is None else design_cols
     df = _add_interactions(input1)
     early = df.loc[df[var1] < peak1].copy()
     # A3.25: inclusive upper bound (>= peak2 and <= peak3), matching manuscript 1
     late = df.loc[(df[var1] >= peak2) & (df[var1] <= peak3)].copy()
 
-    x1 = sm.add_constant(early[DESIGN_COLS], has_constant="add")
-    x2 = sm.add_constant(late[DESIGN_COLS], has_constant="add")
+    x1 = sm.add_constant(early[design_cols], has_constant="add")
+    x2 = sm.add_constant(late[design_cols], has_constant="add")
     y1 = early["count"].to_numpy(dtype=float)   # A3.21/G4: RAW integer counts
     y2 = late["count"].to_numpy(dtype=float)
     return x1, x2, y1, y2, early["log_exposure"], late["log_exposure"], early, late
@@ -1072,6 +1113,168 @@ def run_piecewise_and_gam(df_run: pd.DataFrame, label: str, *,
 
 
 # -----------------------------------------------------------------------------
+# Lab-meeting add-ons: smoking-stratified windows, <1-month table, bed_share x LBW
+# interaction. Supplementary to the primary models; each fails soft.
+# -----------------------------------------------------------------------------
+
+def run_windowed_stratified(df_run: pd.DataFrame, by: str = "smoke", *,
+                            pca_min: int = PCA_MIN, pca_max: int = PCA_MAX,
+                            peak1: int = PEAK1, peak2: int = PEAK2,
+                            peak3: int | None = None, min_count: int = MIN_COUNT,
+                            exposure_dir: Path = EXPOSURE_DIR,
+                            offset_mode: str = "joint") -> dict:
+    """
+    Lab action items 2 & 3: re-fit the early AND late windowed NB models
+    separately for each level of `by` (default maternal smoking). `by` is dropped
+    from the design when it is constant within a stratum (smoke). The primary
+    models keep the bed_share x smoke interaction; this is for interpreting it.
+    Outputs -> output_data/ncfrp/stratified/{by}{level}_{early,late}_irr.csv and
+    output_figures/ncfrp/Figure5_{by}_stratified.{png,tiff}.
+    """
+    peak3 = pca_max if peak3 is None else peak3
+    var1 = "pca"
+    design = DESIGN_COLS_NOSMOKE if by == "smoke" else DESIGN_COLS
+    strat_dir = OUT_DATA_DIR / "stratified"
+    strat_dir.mkdir(parents=True, exist_ok=True)
+    levels = sorted(pd.Series(df_run[by]).dropna().unique())
+    saved: dict = {}
+    for lvl in levels:
+        lvl_i = int(lvl)
+        sub = df_run.loc[df_run[by] == lvl].copy()
+        try:
+            inp = make_ncfrp_input(var1, sub, exposure_dir=exposure_dir,
+                                   min_count=min_count, offset_mode=offset_mode)
+            x1, x2, y1, y2, off1, off2, _e, _l = prepare_piecewise_data(
+                inp, var1, peak1, peak2, peak3, design_cols=design)
+            m_e = NegativeBinomial(y1, x1, offset=off1).fit(maxiter=200, disp=False)
+            m_l = NegativeBinomial(y2, x2, offset=off2).fit(maxiter=200, disp=False)
+            for win, m in [("early", m_e), ("late", m_l)]:
+                pref = f"{strat_dir}/{by}{lvl_i}_{win}"
+                saved[(lvl_i, win)] = save_nb_model_outputs(m, pref)
+                with open(f"{pref}_summary.txt", "w") as f:
+                    f.write(str(m.summary()))
+            LOG.info("stratified %s=%d: early %d strata rows / late %d strata rows",
+                     by, lvl_i, len(x1), len(x2))
+        except Exception as e:
+            LOG.warning("stratified %s=%s failed: %r", by, lvl, e)
+
+    try:
+        levs = sorted({k[0] for k in saved})
+        if len(levs) == 2:
+            fig, axs = plt.subplots(2, 2, figsize=(15, 12))
+            fig.subplots_adjust(left=0.30, right=0.96, top=0.95, bottom=0.07,
+                                hspace=0.5, wspace=0.6)
+            for r, lvl_i in enumerate(levs):
+                for c, win in enumerate(["early", "late"]):
+                    draw_nb_forest_panel(f"{strat_dir}/{by}{lvl_i}_{win}_irr.csv",
+                                         axs[r, c], f"{by}={lvl_i}, {win} window",
+                                         0.3, 40)
+            fig.savefig(FIG_DIR / f"Figure5_{by}_stratified.png", dpi=300,
+                        bbox_inches="tight")
+            fig.savefig(FIG_DIR / f"Figure5_{by}_stratified.tiff", dpi=300,
+                        format="tiff", bbox_inches="tight")
+            plt.close(fig)
+    except Exception as e:
+        LOG.warning("stratified forest (%s) failed: %r", by, e)
+    return saved
+
+
+def under1mo_by_smoke_bedshare(df: pd.DataFrame, out_dir: Path = OUT_DATA_DIR) -> pd.DataFrame:
+    """
+    Lab action item 2: descriptive count of deaths before 1 month of age, by
+    maternal smoking x bed sharing. Not a model. -> output_data/ncfrp/stratified/.
+    """
+    wpm = 365.25 / 12 / 7
+    d = df.copy()
+    u1 = pd.to_numeric(d["infageweeks"], errors="coerce") < wpm
+    smoker = np.where(d["smoke"] == 1, "Smoker", "Non-smoker")
+    bs = np.where(d["bed_share"].astype(str).str.upper().str[0] == "Y",
+                  "Bed sharing", "Not bed sharing")
+    rows = []
+    for sm_lbl in ["Smoker", "Non-smoker"]:
+        m_sm = smoker == sm_lbl
+        rec = {"Maternal smoking": sm_lbl, "N in group": f"{int(m_sm.sum()):,}"}
+        for bs_lbl in ["Bed sharing", "Not bed sharing"]:
+            m = m_sm & (bs == bs_lbl)
+            n_grp = int(m.sum())
+            n_u1 = int((u1 & m).sum())
+            rec[f"{bs_lbl}: deaths <1 mo"] = (
+                f"{n_u1:,} / {n_grp:,} ({100 * n_u1 / n_grp:.1f}%)"
+                if n_grp else "0 / 0 (NA)")
+        rows.append(rec)
+    tab = pd.DataFrame(rows)
+    strat_dir = Path(out_dir) / "stratified"
+    strat_dir.mkdir(parents=True, exist_ok=True)
+    tab.to_csv(strat_dir / "under1mo_by_smoke_bedshare.csv", index=False)
+    try:
+        with open(strat_dir / "under1mo_by_smoke_bedshare.md", "w") as f:
+            f.write(tab.to_markdown(index=False))
+    except Exception as e:
+        LOG.warning("under1mo markdown write failed: %r", e)
+    LOG.info("Deaths <1 month by smoking x bed sharing:\n%s", tab.to_string(index=False))
+    return tab
+
+
+def run_windowed_lbw_interaction(df_run: pd.DataFrame, *, pca_min: int = PCA_MIN,
+                                 pca_max: int = PCA_MAX, peak1: int = PEAK1,
+                                 peak2: int = PEAK2, peak3: int | None = None,
+                                 min_count: int = MIN_COUNT,
+                                 exposure_dir: Path = EXPOSURE_DIR,
+                                 offset_mode: str = "joint") -> None:
+    """
+    Lab action item 1 (interaction form): early/late windowed NB with a <2500 g
+    birthweight indicator and a bed_share x lbw term added to the prespecified
+    design. Birthweight has no population offset, so lbw enters offset-neutral
+    (log_exposure joined on the smoke/preterm/bed_share keys). Self-contained;
+    does not touch the primary models. The early cell may be underpowered once
+    split by lbw - a failure is logged, not raised.
+    -> output_data/ncfrp/lbw_interaction_{early,late}_irr.csv
+    """
+    if "lbw_bin" not in df_run.columns or pd.Series(df_run["lbw_bin"]).isna().all():
+        LOG.warning("lbw_bin unavailable - skipping bed_share x LBW interaction")
+        return
+    peak3 = pca_max if peak3 is None else peak3
+    var1 = "pca"
+    base = make_ncfrp_input(var1, df_run, exposure_dir=exposure_dir,
+                            min_count=1, offset_mode=offset_mode)
+    key = ["bed_share", "smoke", "preterm"]
+    off = base[key + ["log_exposure"]].drop_duplicates(subset=key)
+
+    d = df_run.dropna(subset=["lbw_bin"]).copy()
+    d["_bed"] = (d["bed_share"].astype(str).str.upper().str[0] == "Y").astype(int)
+    d["_smk"] = d["smoke"].astype(int)
+    d["_pt"] = (d["preterm"].astype(str).str.upper().str[0] == "Y").astype(int)
+    d["_lbw"] = d["lbw_bin"].astype(int)
+    cnt = (d.groupby([var1, "_bed", "_smk", "_pt", "_lbw"]).size()
+           .reset_index(name="count")
+           .rename(columns={"_bed": "bed_share", "_smk": "smoke",
+                            "_pt": "preterm", "_lbw": "lbw"}))
+    cnt = (cnt.loc[cnt["count"] >= min_count]
+           .merge(off, on=key, how="left").dropna(subset=["log_exposure"]))
+    cnt["bed_share:smoke"] = cnt["bed_share"] * cnt["smoke"]
+    cnt["bed_share:preterm"] = cnt["bed_share"] * cnt["preterm"]
+    cnt["bed_share:lbw"] = cnt["bed_share"] * cnt["lbw"]
+    cols = DESIGN_COLS + ["lbw", "bed_share:lbw"]
+
+    OUT_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    windows = {"early": cnt.loc[cnt[var1] < peak1],
+               "late": cnt.loc[(cnt[var1] >= peak2) & (cnt[var1] <= peak3)]}
+    for win, part in windows.items():
+        try:
+            x = sm.add_constant(part[cols], has_constant="add")
+            y = part["count"].to_numpy(dtype=float)
+            m = NegativeBinomial(
+                y, x, offset=part["log_exposure"].to_numpy(dtype=float)
+            ).fit(maxiter=200, disp=False)
+            save_nb_model_outputs(m, f"{OUT_DATA_DIR}/lbw_interaction_{win}")
+            with open(f"{OUT_DATA_DIR}/lbw_interaction_{win}_summary.txt", "w") as f:
+                f.write(str(m.summary()))
+            LOG.info("lbw interaction %s window: %d strata rows", win, len(x))
+        except Exception as e:
+            LOG.warning("lbw interaction %s window failed: %r", win, e)
+
+
+# -----------------------------------------------------------------------------
 # CLI / main
 # -----------------------------------------------------------------------------
 
@@ -1107,6 +1310,14 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=SEED)
     p.add_argument("--no-sex-strata", action="store_true",
                    help="skip the FEMALES / MALES runs (A4.31: they run by default)")
+    p.add_argument("--no-extra-strata", action="store_true",
+                   help="skip the lab-meeting add-ons: LBW/NONLBW runs, the "
+                        "months-age sensitivity run, smoking-stratified windows, "
+                        "the <1-month table, and the bed_share x LBW interaction")
+    p.add_argument("--smooth-window-pna", type=int, default=SMOOTH_WINDOW_PNA,
+                   help="Figure 2A display-only centred moving-average window (weeks)")
+    p.add_argument("--smooth-window-pca", type=int, default=SMOOTH_WINDOW_PCA,
+                   help="Figure 2B display-only centred moving-average window (weeks)")
     return p
 
 
@@ -1132,6 +1343,8 @@ def main(argv: list[str] | None = None) -> int:
     global PCA_MIN, PCA_MAX, PEAK1, PEAK2, MIN_COUNT
     PCA_MIN, PCA_MAX, PEAK1, PEAK2, MIN_COUNT = (
         args.pca_min, args.pca_max, args.peak1, args.peak2, args.min_count)
+    global SMOOTH_WINDOW_PNA, SMOOTH_WINDOW_PCA
+    SMOOTH_WINDOW_PNA, SMOOTH_WINDOW_PCA = args.smooth_window_pna, args.smooth_window_pca
 
     ensure_dirs()
 
@@ -1163,6 +1376,50 @@ def main(argv: list[str] | None = None) -> int:
             peak1=args.peak1, peak2=args.peak2, peak3=args.peak3,
             min_count=args.min_count, exposure_dir=args.exposure_dir,
             gam_alpha_grid=args.gam_alpha_grid, offset_mode=args.offset_mode)
+
+    # ---- lab-meeting add-ons (supplementary; each fails soft) ----------------
+    if not args.no_extra_strata:
+        extra: dict = {}
+        if "lbw_bin" in df.columns and not df["lbw_bin"].isna().all():
+            extra["LBW"] = df.loc[df["lbw_bin"] == 1].copy()
+            extra["NONLBW"] = df.loc[df["lbw_bin"] == 0].copy()
+        if "infagecat" in df.columns:
+            # anti-periodicity sensitivity: drop records whose age was reported in
+            # whole months (infagecat == 2), the source of the 4/8/12-week spikes
+            extra["SENS_NO_MONTH_AGE"] = df.loc[df["infagecat"] != 2].copy()
+        for label, sub in extra.items():
+            try:
+                # gam_alpha_grid=0 for the supplementary strata: they do not need
+                # CV spline-penalty selection and it is the dominant cost.
+                run_piecewise_and_gam(
+                    sub, label, pca_min=args.pca_min, pca_max=args.pca_max,
+                    peak1=args.peak1, peak2=args.peak2, peak3=args.peak3,
+                    min_count=args.min_count, exposure_dir=args.exposure_dir,
+                    gam_alpha_grid=0, offset_mode=args.offset_mode)
+            except Exception as e:
+                LOG.warning("extra stratum run %s failed: %r", label, e)
+
+        if args.offset_mode == "joint":
+            try:
+                run_windowed_stratified(
+                    df, "smoke", pca_min=args.pca_min, pca_max=args.pca_max,
+                    peak1=args.peak1, peak2=args.peak2, peak3=args.peak3,
+                    min_count=args.min_count, exposure_dir=args.exposure_dir,
+                    offset_mode=args.offset_mode)
+            except Exception as e:
+                LOG.warning("run_windowed_stratified(smoke) failed: %r", e)
+            try:
+                under1mo_by_smoke_bedshare(df)
+            except Exception as e:
+                LOG.warning("under1mo_by_smoke_bedshare failed: %r", e)
+            try:
+                run_windowed_lbw_interaction(
+                    df, pca_min=args.pca_min, pca_max=args.pca_max,
+                    peak1=args.peak1, peak2=args.peak2, peak3=args.peak3,
+                    min_count=args.min_count, exposure_dir=args.exposure_dir,
+                    offset_mode=args.offset_mode)
+            except Exception as e:
+                LOG.warning("run_windowed_lbw_interaction failed: %r", e)
 
     LOG.info("DONE. Outputs under %s", Path("output_data/ncfrp").resolve())
     return 0

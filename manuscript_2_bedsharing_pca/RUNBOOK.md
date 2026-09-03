@@ -5,6 +5,13 @@ the codebook, PRAMS, and the CDC live-birth denominators live. Every step writes
 into `output_data/` and `output_figures/` under the working directory you pass as
 `--outdir`.
 
+**v2 (post lab meeting, gate G10 closed):** the death-year window is **2008-2019**.
+`run_all.sh` defaults `YEAR_MIN=2008 YEAR_MAX=2019` and threads `--year-min` /
+`--year-max` into every step that loads the case data
+(`ncfrp_manuscript_v5.py`, `generate_table{1,2,3}.py`,
+`pca_boundary_report_ncfrp.py`, `compare_time_axes.py`). Freeze the v2 outputs
+under `../../manuscript_2/AJE/v2/`; never overwrite `AJE/v1/`.
+
 See `AUDIT_FINDINGS.md` for why each step is shaped the way it is. Items still
 needing a decision or a codebook lookup are called out inline as **[CHECK]**.
 
@@ -159,23 +166,61 @@ Writes, per run (ALL / FEMALES / MALES):
 - `output_data/ncfrp/smoke_bedshare_case_cooccurrence.{csv,txt}` - the case-only
   chi-square, labelled as co-occurrence not risk (A3.24).
 - `output_figures/ncfrp/Figure2_{run}.{png,tiff}`, `Figure4_{run}.{png,tiff}`,
-  `output_figures/ncfrp/gam/Figure3_{run}.{png,tiff}`.
+  `output_figures/ncfrp/gam/Figure3_{run}.{png,tiff}`. Figure 2 now shows the
+  raw weekly values as faint dots under a centred moving-average line
+  (`--smooth-window-pna` / `--smooth-window-pca`, display only; A3.21/G4).
+
+### v2 lab-meeting add-ons (JOINT run only; each fails soft, `--no-extra-strata` skips all)
+
+- **LBW / NONLBW runs** - the full two-stage pipeline over `inf3biwt < 2500` vs
+  `>= 2500`, exactly like FEMALES / MALES. `{lbw,nonlbw}_{early,late}_irr.csv`,
+  `{lbw,nonlbw}_gam_exp.csv`, `Figure{2,3,4}_{LBW,NONLBW}.*`. Bed-sharing IRR is
+  read across the two strata (no population LBW denominator - state this).
+- **SENS_NO_MONTH_AGE run** - the pipeline re-fit after dropping records whose
+  age was reported in whole months (`infagecat == 2`).
+  `sens_no_month_age_{early,late}_irr.csv` - should match the primary IRRs within
+  CI (anti-periodicity robustness).
+- **Smoking-stratified windows** (`run_windowed_stratified`) ->
+  `output_data/ncfrp/stratified/smoke{0,1}_{early,late}_irr.csv` +
+  `output_figures/ncfrp/Figure5_smoke_stratified.{png,tiff}`. Reduced design
+  (no `smoke` term). Lab action items 2 & 3.
+- **`under1mo_by_smoke_bedshare`** -> `output_data/ncfrp/stratified/under1mo_by_smoke_bedshare.{csv,md}`.
+  Descriptive deaths before 1 month of age, smoker x bed sharing.
+- **`run_windowed_lbw_interaction`** ->
+  `output_data/ncfrp/lbw_interaction_{early,late}_irr.csv` - windowed NB with a
+  `<2500 g` indicator and a `bed_share x lbw` term (offset-neutral in lbw). The
+  early cell may be underpowered; a failure is logged, not raised.
 
 ## 8. Manuscript-support outputs (run after step 7; run_all.sh does this)
 
 - `src/generate_table1.py` -> `output_data/ncfrp/table1_by_bedshare.{csv,md}`.
   "Characteristics of the analytic SUID cohort by bed-sharing status", counts +
   column %, on the pre-peak-split cohort (AUDIT A4.29 / R1.8 / Ed E14). Sex is a
-  row; birthweight uses the LR_BW-imputed column.
+  row; birthweight uses the LR_BW-imputed column. The row-building logic
+  (`build_cohort_table`) is shared with the two tables below.
+- `src/generate_table2.py` -> `output_data/ncfrp/table2_by_birthweight.{csv,md}`.
+  Same layout, stratified by birthweight category (<2500 / 2500-3499 / >=3500 g
+  by default; `--lbw-cut` / `--hbw-cut` to change). Bed sharing becomes a row;
+  the birthweight block is dropped. Needs the LR_BW-imputed `inf3biwt` column.
+- `src/generate_table3.py` -> `output_data/ncfrp/table3_by_sex.{csv,md}`. Same
+  layout, stratified by infant sex (the direct analogue of manuscript 1's
+  `table1_by_sex`). Bed sharing becomes a row; the "Infant sex" block is dropped.
 - `src/generate_figure1_flow.py` -> `output_figures/ncfrp/Figure1_flow.{png,tiff}`
   and `output_data/ncfrp/figure1_flow.txt`. CONSORT flow straight from
   `ncfrp_flow_audit.csv` + `two_population_Ns.csv`, so every count reconciles and
   the two analytic populations are shown explicitly (AUDIT A4.28 / R1.4 / Ed E4).
 - `src/compare_time_axes.py` -> `output_data/ncfrp/time_axes/`: `gam_fit_comparison.csv`
-  (PCA vs chronological-age GAM deviance/AIC/llf), `observed_by_axis.{png,tiff}`,
+  (PCA vs chronological-age GAM deviance/AIC/llf), `observed_by_axis.{png,tiff}`
+  (now with a `--smooth-window`-wk moving-average overlay),
   `pca_vs_chronological_{scatter.png,correlation.txt}`,
   `proportion_preterm_{by_pca_week,by_chronological_week}.csv` +
-  `proportion_preterm_by_age.png` (AUDIT A6.40-42, A3.26, Ed E8/E9/E13/E15).
+  `proportion_preterm_by_age.png` (AUDIT A6.40-42, A3.26, Ed E8/E9/E13/E15), and
+  `time_axes/reporting_artifact/`: `periodogram_{pca,chrono}.{csv,png}`,
+  `acf_{pca,chrono}.csv`, `spikes_by_age_unit.{csv,md,png}`,
+  `reporting_artifact_summary.txt` - the affirmative check that the repeating
+  local peaks are age-in-months reporting granularity (~4.3 wk), confined to
+  `infagecat == 2` records, not a biological rhythm. Pairs with the
+  `sens_no_month_age_*` runs for the Methods paragraph.
 
 ## 9. Hand back
 

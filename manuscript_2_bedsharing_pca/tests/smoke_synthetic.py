@@ -27,6 +27,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 import ncfrp_manuscript_v5 as pipe  # noqa: E402
+import compare_time_axes as cta  # noqa: E402
 
 
 def _make_cases(n: int, seed: int = 0) -> pd.DataFrame:
@@ -38,8 +39,10 @@ def _make_cases(n: int, seed: int = 0) -> pd.DataFrame:
     df = pd.DataFrame({
         "Unnamed: 0": np.arange(n),                       # stray index col, must be dropped
         "INFageDays": (postnatal_wk * 7 + rng.integers(0, 7, n)).astype(float),
+        "INFagecat": rng.choice([2, 3], n, p=[0.4, 0.6]),  # 2=Months, 3=Days (age-unit split)
         "INF3gestage": gest.astype(float),
         "INF3gestunk": 0,
+        "INF3biwt": np.clip(rng.normal(2400 + 40 * (gest - 24), 400), 700, 5200),
         "Smoker": rng.choice([1, 2], n, p=[0.45, 0.55]),   # 1=Y, 2=N, 9=unknown
         "INFsex": rng.choice([1, 2], n, p=[0.52, 0.48]),   # 1=M, 2=F, 9=unknown
         "Bed_sharing": rng.choice([1, 2], n, p=[0.4, 0.6]),  # 1=Y, 2=N, 9=unknown
@@ -142,9 +145,26 @@ def main() -> int:
                     "output_data/ncfrp/two_population_Ns.csv",
                     "output_data/ncfrp/all_early_irr.csv",
                     "output_data/ncfrp/all_late_irr.csv",
+                    "output_data/ncfrp/all_gam_exp.csv",
                     "output_figures/ncfrp/Figure2_ALL.png",
                     "output_figures/ncfrp/Figure4_ALL.png",
                     "output_figures/ncfrp/gam/Figure3_ALL.png"]:
+            _check((tmp / rel).exists(), f"wrote {rel}")
+
+        # lab-meeting add-ons: the model-based ones fail soft, but the
+        # deterministic descriptive table must be written every time.
+        _check((tmp / "output_data/ncfrp/stratified"
+                / "under1mo_by_smoke_bedshare.csv").exists(),
+               "wrote the <1-month smoke x bed-sharing table")
+
+        rc2 = cta.main(["--data-path", str(data_path),
+                        "--exposure-dir", str(tmp / "output_data" / "risk_exposure"),
+                        "--pca-min", "36", "--pca-max", "90",
+                        "--outdir", str(tmp / "time_axes")])
+        _check(rc2 == 0, "compare_time_axes.main() returns 0")
+        for rel in ["time_axes/reporting_artifact/reporting_artifact_summary.txt",
+                    "time_axes/reporting_artifact/periodogram_chrono.csv",
+                    "time_axes/reporting_artifact/spikes_by_age_unit.csv"]:
             _check((tmp / rel).exists(), f"wrote {rel}")
     except ImportError:
         print("  skip  full main() (pyarrow not installed) - core pipeline still verified")
