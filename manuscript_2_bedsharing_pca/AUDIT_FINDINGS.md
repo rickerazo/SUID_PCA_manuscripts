@@ -195,34 +195,6 @@ etc. `ncfrp_manuscript_v5.py` module constants (47–54) and `preprocess_NCFRP.p
 48, 801–802) assume a fixed CWD. M1's corrected scripts take every path as a CLI arg.
 Fix: parameterize via `argparse`; strip the `/Volumes/...` paths from the captions.
 
-### A1.8 `main()` chdir's into `--outdir` before reading inputs — **DONE (2026-09-02, first HPC run)**
-Found on the first real run of `run_all.sh`. `ncfrp_manuscript_v5.py::main` does
-`os.chdir(args.outdir)` (so all figure/CSV writes land under `out_joint/` /
-`out_marginal/`), but several **input** reads then run with paths that are still
-relative to the original working directory, so they resolve against `out_joint/`
-and raise `FileNotFoundError` even though the file plainly exists in the work dir:
-- `--data-path standardized/NCFRP_SCH_LR_BW_pop.csv` (arg, `load_ncfrp_data`)
-- `--exposure-dir output_data/risk_exposure` (arg, used at step 5 modelling)
-- `get_total_births_denominator` default `standardized/consolidated/denominator.parquet`
-- the six `load_exposure` / `load_joint_exposure` pickles (via `load_pickle`),
-  reached from the descriptive-rate path with the module default `EXPOSURE_DIR`,
-  which is bound at def-time so it cannot be fixed by reassigning the global.
-
-Same class as A1.7 (CWD-bound paths), surfaced by the `chdir` added in the pass-1
-rewrite. Step 4 (`pca_boundary_report_ncfrp.py`) read the same file with the same
-relative path one second earlier and worked, because that script never chdir's.
-
-Fix (in `ncfrp_manuscript_v5.py`, `py_compile`-clean; only file touched):
-capture `ORIG_CWD = Path.cwd()` at module load and again in `main()` immediately
-before the `chdir`; `.resolve()` `args.data_path` and `args.exposure_dir` before
-the `chdir`; and in the two low-level readers `load_pickle` and
-`get_total_births_denominator`, rebase a non-absolute path as `ORIG_CWD / path`.
-Every input read in the script now resolves against the launch dir; the one
-remaining relative read (`pd.read_csv(irr_csv)` in the forest-plot path) is the
-script's own output under `--outdir` and is meant to stay relative. Only
-`ncfrp_manuscript_v5.py` has an `os.chdir`; the step-6 scripts build paths from
-`args.outdir` / `args.workdir` and never chdir, so they were unaffected.
-
 ---
 
 ## A2 — Case selection and preprocessing
@@ -436,8 +408,8 @@ check (E13) points the other way. Do not assert this until it survives the corre
 Fix: add a descriptive "proportion of deaths preterm by PCA week and by chronological-age
 week" plot; be prepared to drop or reverse the claim and cite what others report.
 
-### A3.27 Non-standard GAM deviation smooth carries the main visual claim — **Medium, [HPC]**
-`prepare_curve_data_ncfrp` (`ncfrp_manuscript_v5.py:1153-1158`) builds
+### A3.27 Non-standard GAM deviation smooth carries the main visual claim — **DONE (2026-09-04)**
+`prepare_curve_data_ncfrp` (`ncfrp_manuscript_v5.py:865-890`) builds
 `pca_beddev = where(bed_share == 1, pca, median(pca))` and fits a second B-spline on it as a
 "bed-share deviation" smooth. This is the mechanism behind the "bed-sharing trajectory peaks
 earlier and more sharply" statement. It is not a standard interaction spline and its knot
@@ -445,6 +417,70 @@ placement (`make_knots_from_data`, uniform `step=6`) differs from M1's peak-anch
 (`generate_figure3_gam_curves.py:167-178`).
 Fix: add a standard `bed_share`-by-PCA tensor / interaction-spline formulation as a robustness
 check; report knot placement, `df`, and the fixed vs CV alpha choice in Methods.
+
+**Status update:** the "standard interaction-spline" fix described above was implemented
+(`gam_res_int`, `run_piecewise_and_gam` lines ~1076-1095 of an earlier version of this file)
+but was never verified before being wired into the pipeline. It was **numerically degenerate**:
+under the primary joint-offset design, every stratum's `*_gam_bedshareXpca_exp.csv` had
+`bed_share` and several high-order spline terms with matching std errors ≈329 and IRR/CI
+spanning ~560 orders of magnitude (e.g. `out_joint/output_data/ncfrp/all_gam_bedshareXpca_exp.csv`:
+`bed_share` coef=-6.29 SE=329.2, `x1_s6..x1_s14` all SE≈329). Root cause, confirmed by tracing
+the code: that variant built its interaction smooth from the raw product `xs_int = pca *
+bed_share` (`:1082-1083` of that version) — exactly 0 for every non-bed-sharing row — and fed
+it into `make_knots_from_data` (knots from `min`/`max` of that column), which placed knots in a
+PCA range (~6-30) with **zero real support** (no bed_share=1 row has PCA < 36; every bed_share=0
+row contributed only the repeated value 0). A second, deeper issue: `BSplines()` expands
+whatever column it is given as an independent scalar covariate — it has no "by" mechanism, so
+multiplying by `bed_share` **before** basis expansion (that code) is not the same operation as
+multiplying **after** expansion (the standard varying-coefficient / mgcv `s(x, by=g)`
+construction), and only the latter is identifiable against the parametric `bed_share` term.
+`save_gam_model_outputs` never asserted CI-brackets-estimate (see A3.28), so this reached disk
+with zero warning.
+
+**Fix applied:** `gam_res_int` was retired from `run_piecewise_and_gam` (it no longer runs or
+writes `*_gam_bedshareXpca_*` files). Its corrected replacement is a **standalone script**,
+`src/gam_bedshare_pca_varycoef.py`, fit as a plain NB MLE
+(`statsmodels.discrete.discrete_model.NegativeBinomial`, the same optimizer already used and
+trusted for the early/late piecewise models) rather than through `GLMGam` — this sidesteps the
+penalized-IRLS machinery that was the proximate numerical failure mode. It builds the
+interaction smooth correctly: knots from the bed_share==1 **subset's** real PCA quantiles
+(fixes the knot-range bug), the basis evaluated at every row's real PCA value (no zero
+placeholder), centered on the bed_share==1 subset's column means (the standard sum-to-zero
+identifiability constraint), and only **then** multiplied by `bed_share` — "expand, then
+multiply," not "multiply, then expand." (The main `s(pca)` smooth needed the same centering
+treatment for an unrelated reason: patsy's `cr()` basis is a partition of unity, so it is
+perfectly collinear with a separate parametric Intercept column unless centered — caught by
+`check_design_rank`, see A3.28, while developing the fix.) See
+`gam_bedshare_pca_varycoef.py`'s module docstring for the full construction and the
+alternatives considered (a corrected `GLMGam`, mgcv via rpy2, pyGAM) and why a fixed-df NB MLE
+was chosen instead. Verified on a synthetic fixture with a known injected varying-coefficient
+effect (`tests/smoke_synthetic.py::test_varycoef_replaces_degenerate_construction`) that (a) the
+OLD construction still degenerates on that fixture (interaction-basis terms collapse to ~0 —
+the same rank-deficiency, manifesting as collapse-to-zero rather than explode-to-infinity at
+this smaller scale) and (b) the NEW construction recovers sane, bounded estimates (max std err
+well under 1 on this fixture vs the real run's ~329) and the correct early>late shape of the
+injected effect. **Not yet run against real data** (HPC-only) — see `RUNBOOK.md` "9b" for how,
+and check the numeric thresholds there before trusting the output for the manuscript. Residual
+caveat once run for real: even a corrected fit's high-PCA tail for bed_share=1 will have thin
+support (`two_population_Ns.csv`); treat the far right end of the curve/CI as illustrative, not
+precise, and prefer truncating the reported domain over forcing a falsely-confident curve if the
+CI band still widens sharply there.
+
+### A3.28 `save_gam_model_outputs` never checked CI-brackets-estimate — **DONE (2026-09-04)**
+`save_nb_model_outputs` (`:572-583`) has asserted `IRR_ci_low <= IRR <= IRR_ci_high`
+(`_assert_ci_brackets_estimate`, `:562-569`) before writing since A4.30. `save_gam_model_outputs`
+(`:586-596`), used for every GAM fit including the degenerate `gam_res_int` variant described in
+A3.27, had no such check — it wrote `{out_prefix}_exp.csv` unconditionally. This is exactly how
+an IRR of 0.0018 with a CI spanning 560 orders of magnitude reached disk with no warning.
+Fix: `save_gam_model_outputs` now runs the same `_assert_ci_brackets_estimate` check, plus a new
+max-SE sanity guard (`SE_SANITY_MAX = 20.0` on the log scale) that raises with the offending
+terms named if any coefficient's std error exceeds it — a CI can technically bracket its point
+estimate and still be numerically meaningless, which the bracket check alone would not catch.
+Also added: `check_design_rank(X, colnames, label, cond_threshold=1e8)`, a general-purpose
+pre-fit collinearity/rank check (numpy `matrix_rank`/`cond`, naming suspect columns via a pivoted
+QR on failure) — call it before any new NB/GAM fit in this pipeline. Both live near
+`_assert_ci_brackets_estimate` in `ncfrp_manuscript_v5.py` and are used by
+`gam_bedshare_pca_varycoef.py`.
 
 ---
 

@@ -86,6 +86,7 @@ from statsmodels.gam.generalized_additive_model import GLMGam
 from statsmodels.gam.smooth_basis import BSplines
 from statsmodels.genmod.families import NegativeBinomial as NB
 from scipy.stats import chi2_contingency
+from scipy.linalg import qr as _qr
 
 LOG = logging.getLogger("ncfrp_manuscript")
 
@@ -569,6 +570,36 @@ def _assert_ci_brackets_estimate(tab: pd.DataFrame, label: str) -> None:
             f"estimate:\n{bad[['IRR', 'IRR_ci_low', 'IRR_ci_high']]}")
 
 
+# A3.28: general-purpose pre-fit collinearity/rank-deficiency guard. Added
+# alongside the A3.27 close-out (see the retired gam_res_int block, formerly
+# here, and gam_bedshare_pca_varycoef.py) after tracing the degenerate
+# bed_share x PCA GAM variant to an unidentified design: matching, exploded
+# std errors (~329) between the bed_share term and several spline-basis terms
+# is the textbook signature of a flat/near-null ridge in the Fisher
+# information that no amount of roughness-penalty (CV alpha) selection can
+# regularize, because that penalty never ties a parametric term to a smooth
+# term's basis. Call this on any new NB/GAM design before trusting a fit.
+SE_SANITY_MAX = 20.0  # log-scale std err above this is not a usable estimate
+
+
+def check_design_rank(X: np.ndarray, colnames: list[str], label: str, *,
+                      cond_threshold: float = 1e8) -> None:
+    """Log-and-raise pre-fit collinearity/rank check. Cheap relative to any
+    NB/GAM fit: O(min(n,p)^2 * max(n,p))."""
+    X = np.asarray(X, dtype=float)
+    rank = np.linalg.matrix_rank(X)
+    cond = np.linalg.cond(X)
+    if rank < X.shape[1] or cond > cond_threshold:
+        # QR with column pivoting names which columns are implicated.
+        _, _, piv = _qr(X, mode="economic", pivoting=True)
+        suspect = [colnames[i] for i in piv[rank:]]
+        msg = (f"[{label}] design rank={rank}/{X.shape[1]}, cond={cond:.3g} "
+              f"(threshold {cond_threshold:.0e}); suspect columns: {suspect}")
+        if rank < X.shape[1]:
+            raise ValueError(msg)   # hard block: truly singular
+        LOG.warning(msg)           # soft warn: ill-conditioned but full rank
+
+
 def save_nb_model_outputs(model, out_prefix: str) -> pd.DataFrame:
     os.makedirs(os.path.dirname(out_prefix), exist_ok=True)
     try:
@@ -584,12 +615,23 @@ def save_nb_model_outputs(model, out_prefix: str) -> pd.DataFrame:
 
 
 def save_gam_model_outputs(model, out_prefix: str) -> pd.DataFrame:
+    """A3.28: this used to write unconditionally - the exact gap that let the
+    degenerate gam_res_int variant (SE~329, CI spanning ~560 orders of
+    magnitude) reach disk with no warning. Now matches save_nb_model_outputs's
+    CI-bracket assertion, plus a max-SE sanity bound (a CI can technically
+    bracket its point estimate and still be numerically meaningless)."""
     os.makedirs(os.path.dirname(out_prefix), exist_ok=True)
     try:
         model.summary2().tables[1].to_csv(f"{out_prefix}_summary.csv")
     except Exception:
         _coef_table(model).to_csv(f"{out_prefix}_summary.csv")
     gam_exp = _coef_table(model)
+    _assert_ci_brackets_estimate(gam_exp, out_prefix)
+    huge = gam_exp.loc[gam_exp["std_err"] > SE_SANITY_MAX]
+    if len(huge):
+        raise AssertionError(
+            f"[{out_prefix}] {len(huge)} term(s) have std_err > {SE_SANITY_MAX} "
+            f"(likely rank-deficient design):\n{huge[['coef', 'std_err']]}")
     gam_exp.to_csv(f"{out_prefix}_exp.csv")
     LOG.info("GAM exp(coef) %s\n%s", out_prefix,
              gam_exp[["IRR", "IRR_ci_low", "IRR_ci_high", "p_value"]].to_string())
@@ -1073,17 +1115,15 @@ def run_piecewise_and_gam(df_run: pd.DataFrame, label: str, *,
     gam_res, knots = fit_nb_gam(x_linear, x_smooth, y, offset, alpha_grid_size=gam_alpha_grid)
     LOG.info("%s GAM knots: %s", label, knots)
 
-    # A3.27 exploratory robustness variant: a bed_share-scaled PCA smooth as a
-    # rough alternative to the pca_beddev deviation smooth. Secondary output
-    # only; a proper varying-coefficient / tensor treatment is still TODO.
-    gam_res_int = None
-    try:
-        xl_int = x_linear.copy()
-        xs_int = np.column_stack([x_smooth[:, 0],
-                                  x_smooth[:, 0] * xl_int["bed_share"].to_numpy()])
-        gam_res_int, _ = fit_nb_gam(xl_int, xs_int, y, offset, alpha_grid_size=gam_alpha_grid)
-    except Exception as e:  # keep the primary run alive if the variant fails to converge
-        LOG.warning("%s GAM interaction-spline variant failed: %r", label, e)
+    # A3.27: the exploratory bed_share x PCA interaction-spline robustness
+    # variant that used to be fit here (gam_res_int) was retired 2026-09-04 -
+    # it was numerically degenerate (SE~329, CI spanning ~560 orders of
+    # magnitude; see AUDIT_FINDINGS.md A3.27 close-out for the root cause: its
+    # knots were placed from a zero-inflated bed_share*pca product instead of
+    # the bed_share==1 subset's real PCA range, and it multiplied by
+    # bed_share BEFORE basis expansion instead of after). The corrected
+    # replacement is a standalone varying-coefficient model, fit as a plain
+    # NB MLE rather than through GLMGam: see gam_bedshare_pca_varycoef.py.
 
     # save model outputs (single source of numbers - A4.30)
     OUT_DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -1091,8 +1131,6 @@ def run_piecewise_and_gam(df_run: pd.DataFrame, label: str, *,
     early_irr = save_nb_model_outputs(model_early, f"{OUT_DATA_DIR}/{slug}_early")
     late_irr = save_nb_model_outputs(model_late, f"{OUT_DATA_DIR}/{slug}_late")
     save_gam_model_outputs(gam_res, f"{OUT_DATA_DIR}/{slug}_gam")
-    if gam_res_int is not None:
-        save_gam_model_outputs(gam_res_int, f"{OUT_DATA_DIR}/{slug}_gam_bedshareXpca")
 
     with open(f"{OUT_DATA_DIR}/{slug}_early_summary.txt", "w") as f:
         f.write(str(model_early.summary()))
@@ -1107,7 +1145,7 @@ def run_piecewise_and_gam(df_run: pd.DataFrame, label: str, *,
                    pca_min=pca_min, pca_max=pca_max)
 
     return {"input_df": input_df, "model_early": model_early, "model_late": model_late,
-            "gam_res": gam_res, "gam_res_int": gam_res_int, "knots": knots,
+            "gam_res": gam_res, "knots": knots,
             "early_data": early, "late_data": late, "curve_data": curve_df,
             "early_irr": early_irr, "late_irr": late_irr}
 

@@ -33,6 +33,12 @@ compare_time_axes.py       PCA vs chronological-age GAM fit comparison + checks
   source of the analytic cohort; it writes `output_data/ncfrp_flow_audit.csv`.
 - Every figure/table reads one saved model-output CSV; a check asserts each CI
   brackets its estimate.
+- Every NB/GAM fit checks design rank/condition number before fitting
+  (`check_design_rank`) and every saved coefficient table asserts CI-brackets-
+  point-estimate and a max-SE sanity bound before writing
+  (`save_gam_model_outputs` / `save_nb_model_outputs`) - added after A3.27
+  traced a degenerate GAM variant to an unidentified design that reached disk
+  with no warning.
 - Fit NB/GAM on raw integer counts; smoothing is display-only.
 - `--denominator` for `risk_exposure_joint.py` is the FULL US live-birth file,
   never a matched case/control set.

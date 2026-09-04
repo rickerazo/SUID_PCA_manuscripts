@@ -75,6 +75,24 @@ python "$SRC/ncfrp_manuscript_v5.py" \
     --no-extra-strata \
     --outdir out_marginal
 
+echo "== 5c. bed_share x PCA varying-coefficient robustness check (A3.27 replacement for the retired gam_res_int) =="
+python "$SRC/gam_bedshare_pca_varycoef.py" \
+    --data-path "$DATA" \
+    --exposure-dir output_data/risk_exposure \
+    --pca-min "$PCA_MIN" --pca-max "$PCA_MAX" \
+    --year-min "$YEAR_MIN" --year-max "$YEAR_MAX" \
+    --offset-mode joint \
+    --min-count 10 \
+    --outdir out_joint
+python "$SRC/gam_bedshare_pca_varycoef.py" \
+    --data-path "$DATA" \
+    --exposure-dir output_data/risk_exposure \
+    --pca-min "$PCA_MIN" --pca-max "$PCA_MAX" \
+    --year-min "$YEAR_MIN" --year-max "$YEAR_MAX" \
+    --offset-mode marginal \
+    --min-count 10 \
+    --outdir out_marginal
+
 echo "== 6. Tables 1-3, CONSORT Figure 1, and the PCA-vs-chronological-age + reporting-artifact analysis =="
 for T in generate_table1 generate_table2 generate_table3; do
     python "$SRC/$T.py" \

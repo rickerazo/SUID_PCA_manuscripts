@@ -160,8 +160,11 @@ Writes, per run (ALL / FEMALES / MALES):
 - `output_data/ncfrp_flow_audit.csv` - the CONSORT case-selection trail (A9).
 - `output_data/ncfrp/two_population_Ns.csv` - full / early / late / peak-excluded N (A3.18).
 - `output_data/ncfrp/{run}_early_irr.csv`, `{run}_late_irr.csv`,
-  `{run}_gam_exp.csv`, `{run}_gam_bedshareXpca_exp.csv` - coefficient tables,
-  each checked so every CI brackets its estimate (A4.30). Figure 4 reads these.
+  `{run}_gam_exp.csv` - coefficient tables, each checked so every CI brackets
+  its estimate (A4.30). Figure 4 reads these. (The `{run}_gam_bedshareXpca_*`
+  variant that used to be written here was retired 2026-09-04 - it was
+  numerically degenerate; see AUDIT_FINDINGS.md A3.27's close-out and 7b
+  below for its corrected replacement.)
 - `output_data/ncfrp/{run}_{early,late}_summary.txt` - full model summaries.
 - `output_data/ncfrp/smoke_bedshare_case_cooccurrence.{csv,txt}` - the case-only
   chi-square, labelled as co-occurrence not risk (A3.24).
@@ -189,6 +192,57 @@ Writes, per run (ALL / FEMALES / MALES):
   `output_data/ncfrp/lbw_interaction_{early,late}_irr.csv` - windowed NB with a
   `<2500 g` indicator and a `bed_share x lbw` term (offset-neutral in lbw). The
   early cell may be underpowered; a failure is logged, not raised.
+
+### 7b. Bed-share x PCA varying-coefficient robustness check (A3.27 replacement)
+
+`run_all.sh` step 5c. Corrected replacement for the retired `gam_res_int`
+variant (see AUDIT_FINDINGS.md A3.27's close-out for the root cause and why
+this is a standalone script rather than a `GLMGam` patch). Additive to
+`out_joint`/`out_marginal` - new file names, new figure subdirectory, nothing
+it writes overwrites anything from step 5/5b.
+
+```bash
+python <repo>/manuscript_2_bedsharing_pca/src/gam_bedshare_pca_varycoef.py \
+    --data-path standardized/NCFRP_SCH_LR_BW_pop.csv \
+    --exposure-dir output_data/risk_exposure \
+    --pca-min "$PCA_MIN" --pca-max "$PCA_MAX" \
+    --year-min "$YEAR_MIN" --year-max "$YEAR_MAX" \
+    --offset-mode joint --outdir out_joint
+# and again with --offset-mode marginal --outdir out_marginal
+```
+
+Writes, per run (ALL / FEMALES / MALES, each fails soft):
+
+- `output_data/ncfrp/{run}_bedshare_pca_varycoef_irr.csv` /
+  `{run}_bedshare_pca_varycoef_summary.csv` - the same `save_nb_model_outputs`
+  single-source coefficient table used by the piecewise NB models (A4.30),
+  now also SE-sanity-checked (`--se-sanity-max`, default 20).
+- `output_figures/ncfrp/varycoef/Figure3b_{run}.{png,tiff}` - fitted
+  incidence trajectories (panel A) and the bed-sharing rate-ratio curve across
+  PCA (panel B), mirroring `Figure3_{run}` but from the corrected
+  varying-coefficient model.
+
+**Before trusting the output for the manuscript**, check (see AUDIT_FINDINGS.md
+A3.27/A3.28 for why these are the right thresholds):
+
+- Every `std_err` well under ~5 on the log scale (the broken variant's was
+  ~329) - `check_design_rank`/the SE-sanity guard should not have needed to
+  raise; if a stratum's run logs a warning and is skipped, that's real
+  evidence worth reporting, not a bug to silence.
+- `bed_share`/interaction-term IRRs the same broad order of magnitude as the
+  working `{run}_gam_exp.csv`'s `bed_share` IRR (~2.7, CI ~[2.2, 3.3]) - not
+  astronomical.
+- `Figure3b_{run}.png`'s CI band should be a plausible width throughout: if it
+  widens sharply specifically at the high-PCA tail, that is genuine data
+  sparsity (the bed_share=1 tail is thin - `two_population_Ns.csv`) reasserting
+  itself, not a construction bug - truncate the reported domain rather than
+  trust a falsely-confident curve out there.
+- Compare the shape against the existing `Figure3_{run}` (deviation-smooth)
+  curve - they should agree on direction.
+
+If this checks out, it's a strong candidate to also satisfy Ed's Figure 3B
+redesign ask (a fitted rate-ratio curve with a proper CI) - a manuscript
+decision, not a pipeline one.
 
 ## 8. Manuscript-support outputs (run after step 7; run_all.sh does this)
 
