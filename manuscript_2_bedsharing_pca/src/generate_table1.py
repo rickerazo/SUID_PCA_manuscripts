@@ -184,7 +184,8 @@ def write_table(tab: pd.DataFrame, outdir: Path, stem: str,
     tab.to_csv(outdir / f"{stem}.csv", index=False)
     with open(outdir / f"{stem}.md", "w") as f:
         f.write(tab.to_markdown(index=False))
-    log.info("Wrote %s", outdir / f"{stem}.csv")
+    tab.to_excel(outdir / f"{stem}.xlsx", index=False)  # for composite-document assembly
+    log.info("Wrote %s (+ .md, .xlsx)", outdir / f"{stem}.csv")
     print(tab.to_string(index=False))
 
 
