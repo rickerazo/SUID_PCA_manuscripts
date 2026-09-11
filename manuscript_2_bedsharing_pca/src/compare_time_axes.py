@@ -212,6 +212,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--exposure-dir", type=Path, default=Path("output_data/risk_exposure"))
     p.add_argument("--pca-min", type=int, default=36)
     p.add_argument("--pca-max", type=int, default=90)
+    p.add_argument("--first-week-cut", type=int, default=1,
+                   help="exclude infageweeks <= this (matches ncfrp_manuscript_v5's default)")
     p.add_argument("--offset-mode", choices=["joint", "marginal"], default="joint")
     p.add_argument("--gam-alpha-grid", type=int, default=0)
     p.add_argument("--year-min", type=int, default=None)
@@ -226,6 +228,7 @@ def main(argv: list[str] | None = None) -> int:
     args.outdir.mkdir(parents=True, exist_ok=True)
 
     df, _ = load_ncfrp_data(args.data_path, pca_min=args.pca_min, pca_max=args.pca_max,
+                            first_week_cut=args.first_week_cut,
                             year_min=args.year_min, year_max=args.year_max, audit_csv=None)
     LOG.info("cohort n=%d", len(df))
 

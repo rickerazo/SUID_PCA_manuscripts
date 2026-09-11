@@ -4,7 +4,7 @@
 #
 # Usage:
 #   cd <work_dir>              # holds data/ , from_Ed/ , and the denominator/PRAMS parquets
-#   bash <repo>/manuscript_2_bedsharing_pca/run_all.sh [PCA_MIN] [PCA_MAX] [YEAR_MIN] [YEAR_MAX]
+#   bash <repo>/manuscript_2_bedsharing_pca/run_all.sh [PCA_MIN] [PCA_MAX] [YEAR_MIN] [YEAR_MAX] [FIRST_WEEK_CUT]
 #
 # v2 (post lab meeting): death-year window is 2008-2019 by default (gate G10).
 set -euo pipefail
@@ -14,6 +14,8 @@ PCA_MIN="${1:-36}"
 PCA_MAX="${2:-90}"          # set from step 4's boundary report; do NOT assume 75
 YEAR_MIN="${3:-2008}"       # G10: v2 restricts to 2008-2019
 YEAR_MAX="${4:-2019}"
+FIRST_WEEK_CUT="${5:-1}"    # exclude infageweeks <= this (G5); 1 = days 0-13 (primary,
+                            # matches Manuscript 1); 0 = days 0-6 only, first-week sensitivity
 DATA="standardized/NCFRP_SCH_LR_BW_pop.csv"
 
 DENOM="${DENOM:-standardized/consolidated/denominator.parquet}"
@@ -22,7 +24,7 @@ PRAMS="${PRAMS:-standardized/PRAMS/prams.parquet}"
 echo "== 0. environment =="
 python -c "import platform; print('python', platform.python_version())" | tee RUN_MANIFEST.md
 pip freeze >> RUN_MANIFEST.md
-echo "PCA_MIN=$PCA_MIN PCA_MAX=$PCA_MAX YEAR_MIN=$YEAR_MIN YEAR_MAX=$YEAR_MAX" | tee -a RUN_MANIFEST.md
+echo "PCA_MIN=$PCA_MIN PCA_MAX=$PCA_MAX YEAR_MIN=$YEAR_MIN YEAR_MAX=$YEAR_MAX FIRST_WEEK_CUT=$FIRST_WEEK_CUT" | tee -a RUN_MANIFEST.md
 
 echo "== 0b. smoke test =="
 python "$SRC/../tests/smoke_synthetic.py"
@@ -48,6 +50,7 @@ python "$SRC/pca_boundary_report_ncfrp.py" \
     --data-path "$DATA" \
     --outdir output_data/ncfrp/pca_boundary \
     --min-cell 5 --pca-min "$PCA_MIN" --pca-max "$PCA_MAX" \
+    --first-week-cut "$FIRST_WEEK_CUT" \
     --year-min "$YEAR_MIN" --year-max "$YEAR_MAX"
 echo "   -> read output_data/ncfrp/pca_boundary/pca_boundary_diagnostics.txt;"
 echo "      re-run below with the chosen PCA_MIN / PCA_MAX if they differ"
@@ -58,6 +61,7 @@ python "$SRC/ncfrp_manuscript_v5.py" \
     --data-path "$DATA" \
     --exposure-dir output_data/risk_exposure \
     --pca-min "$PCA_MIN" --pca-max "$PCA_MAX" \
+    --first-week-cut "$FIRST_WEEK_CUT" \
     --year-min "$YEAR_MIN" --year-max "$YEAR_MAX" \
     --offset-mode joint \
     --min-count 10 \
@@ -69,6 +73,7 @@ python "$SRC/ncfrp_manuscript_v5.py" \
     --data-path "$DATA" \
     --exposure-dir output_data/risk_exposure \
     --pca-min "$PCA_MIN" --pca-max "$PCA_MAX" \
+    --first-week-cut "$FIRST_WEEK_CUT" \
     --year-min "$YEAR_MIN" --year-max "$YEAR_MAX" \
     --offset-mode marginal \
     --min-count 10 \
@@ -80,6 +85,7 @@ python "$SRC/gam_bedshare_pca_varycoef.py" \
     --data-path "$DATA" \
     --exposure-dir output_data/risk_exposure \
     --pca-min "$PCA_MIN" --pca-max "$PCA_MAX" \
+    --first-week-cut "$FIRST_WEEK_CUT" \
     --year-min "$YEAR_MIN" --year-max "$YEAR_MAX" \
     --offset-mode joint \
     --min-count 10 \
@@ -88,6 +94,7 @@ python "$SRC/gam_bedshare_pca_varycoef.py" \
     --data-path "$DATA" \
     --exposure-dir output_data/risk_exposure \
     --pca-min "$PCA_MIN" --pca-max "$PCA_MAX" \
+    --first-week-cut "$FIRST_WEEK_CUT" \
     --year-min "$YEAR_MIN" --year-max "$YEAR_MAX" \
     --offset-mode marginal \
     --min-count 10 \
@@ -98,6 +105,7 @@ for T in generate_table1 generate_table2 generate_table3; do
     python "$SRC/$T.py" \
         --data-path "$DATA" \
         --pca-min "$PCA_MIN" --pca-max "$PCA_MAX" \
+        --first-week-cut "$FIRST_WEEK_CUT" \
         --year-min "$YEAR_MIN" --year-max "$YEAR_MAX" \
         --outdir out_joint/output_data/ncfrp
 done
@@ -106,6 +114,7 @@ python "$SRC/compare_time_axes.py" \
     --data-path "$DATA" \
     --exposure-dir output_data/risk_exposure \
     --pca-min "$PCA_MIN" --pca-max "$PCA_MAX" \
+    --first-week-cut "$FIRST_WEEK_CUT" \
     --year-min "$YEAR_MIN" --year-max "$YEAR_MAX" --offset-mode joint \
     --outdir out_joint/output_data/ncfrp/time_axes
 

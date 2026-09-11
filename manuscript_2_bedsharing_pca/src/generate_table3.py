@@ -54,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
                         datefmt="%H:%M:%S")
 
     df, _ = load_ncfrp_data(args.data_path, pca_min=args.pca_min, pca_max=args.pca_max,
+                            first_week_cut=args.first_week_cut,
                             year_min=args.year_min, year_max=args.year_max, audit_csv=None)
     LOG.info("Table 3 population (pre peak-split analytic cohort): n=%d", len(df))
     tab = table3_by_sex(df, peak1=args.peak1, peak2=args.peak2)

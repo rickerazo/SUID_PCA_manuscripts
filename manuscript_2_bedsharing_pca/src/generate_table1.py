@@ -184,8 +184,7 @@ def write_table(tab: pd.DataFrame, outdir: Path, stem: str,
     tab.to_csv(outdir / f"{stem}.csv", index=False)
     with open(outdir / f"{stem}.md", "w") as f:
         f.write(tab.to_markdown(index=False))
-    tab.to_excel(outdir / f"{stem}.xlsx", index=False)  # for composite-document assembly
-    log.info("Wrote %s (+ .md, .xlsx)", outdir / f"{stem}.csv")
+    log.info("Wrote %s", outdir / f"{stem}.csv")
     print(tab.to_string(index=False))
 
 
@@ -194,6 +193,8 @@ def add_common_args(p: argparse.ArgumentParser) -> None:
                    default=Path("standardized/NCFRP_SCH_LR_BW_pop.csv"))
     p.add_argument("--pca-min", type=int, default=36)
     p.add_argument("--pca-max", type=int, default=90)
+    p.add_argument("--first-week-cut", type=int, default=1,
+                   help="exclude infageweeks <= this (matches ncfrp_manuscript_v5's default)")
     p.add_argument("--peak1", type=int, default=PEAK1)
     p.add_argument("--peak2", type=int, default=PEAK2)
     p.add_argument("--year-min", type=int, default=None)
@@ -210,6 +211,7 @@ def main(argv: list[str] | None = None) -> int:
                         datefmt="%H:%M:%S")
 
     df, _ = load_ncfrp_data(args.data_path, pca_min=args.pca_min, pca_max=args.pca_max,
+                            first_week_cut=args.first_week_cut,
                             year_min=args.year_min, year_max=args.year_max, audit_csv=None)
     LOG.info("Table 1 population (pre peak-split analytic cohort): n=%d", len(df))
     tab = table1_by_bedshare(df, peak1=args.peak1, peak2=args.peak2)
