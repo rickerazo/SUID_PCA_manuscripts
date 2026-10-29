@@ -4,7 +4,7 @@ Follow-up to Manuscript 1, targeting the American Journal of Epidemiology:
 *"Developmental Timing of SUID and the Infant Sleep Environment."* Bed sharing is
 the primary exposure; PCA (postconceptional age) is the developmental axis.
 
-## State (branch `audit/manuscript-2`)
+## State (branch `main`; `audit/manuscript-2` was merged into it and deleted 2026-10-29)
 
 The code here has been audited against Manuscript 1's post-revision standard and
 its referee reports, plus co-author Ed Mitchell's review of draft v6. Full
@@ -55,8 +55,8 @@ G10 apply the 2008-2019 year window (start N drops from 24,314) or keep all year
 
 ## Next step
 
-1. (Optional backup) `git push -u origin audit/manuscript-2` - committed locally
-   as `cf4fc62`; the audit session had no push credentials.
+1. (Optional backup) `git push origin main` - all work is on `main` locally
+   (tip `71049bc`), 7 commits ahead of `origin/main`; nothing pushed yet.
 2. **Copy this folder to the HPC by scp** (NOT git):
    `scp -r ~/Projects/SUID_PCA_manuscripts/manuscript_2_bedsharing_pca <user>@<hpc>:<work_dir>/`
    `<work_dir>` also needs `data/SeattleChildrensNCFRP.sav`,
