@@ -56,20 +56,37 @@ This repository is intended to make the analytical workflow inspectable and audi
 
 Accordingly, this repository should be understood as an archival research companion rather than a turnkey executable software package.
 
-## Suggested structure
+## Repository structure
 
 ```text
 .
-├── README.md
+├── readme.md
+├── LICENSE
+├── environment-minimal.yml        # conda environments captured from the HPC,
+├── environment-full.yml           #   shared by both manuscripts
+├── environment-explicit.txt
+├── mamba-info.txt
 ├── manuscript_1_sex_pca/
-│   ├── README.md
-│   ├── environment.yml
-│   ├── src/
-│   ├── scripts/
-│   └── figures/
+│   ├── readme.md                  # workflow, data, script-to-manuscript map
+│   ├── requirements.txt
+│   ├── src/                       # analysis scripts (one flat folder)
+│   └── figures/                   # figures as submitted
 └── manuscript_2_bedsharing_pca/
-    ├── README.md
-    ├── environment.yml
+    ├── readme.md
+    ├── RUNBOOK.md
+    ├── run_all.sh
+    ├── requirements.txt
     ├── src/
-    ├── scripts/
+    ├── tests/
     └── figures/
+```
+
+## License
+
+The code in this repository is released under the MIT License (see `LICENSE`). The license covers the code and documentation only. It grants no rights to the CDC, NCFRP or PRAMS source data, which are not distributed here and remain subject to their own data-use terms.
+
+## Citation
+
+If you use this code, please cite the corresponding manuscript:
+
+- Manuscript 1: Erazo R, Ramirez JM. Developmental Timing of Male Excess in Sudden Unexpected Infant Death. Submitted to the *American Journal of Epidemiology*.

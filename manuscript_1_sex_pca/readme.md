@@ -115,6 +115,10 @@ See `requirements.txt` in this folder for the packages these scripts need. The r
 
 This folder was revised during peer review after a data-pipeline audit found and corrected several bugs in an earlier internal version of the analysis (for example, a case-selection step that had silently become a no-op, a stale PCA-window boundary, an exposure-computation bug, and a boundary-inclusivity inconsistency between the case series and the regression models). Every script here reflects the corrected pipeline, and all reported results come from it. The earlier exploratory notebook is not included, so that this release reflects a single, internally consistent analysis.
 
+## License
+
+MIT License; see `LICENSE` at the repository root. The license covers the code only, not the CDC source data.
+
 ## Maintenance status
 
 This folder is an archival code release accompanying the manuscript. Ongoing support and feature development are not planned.
