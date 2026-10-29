@@ -461,7 +461,14 @@ def count_ncfrp_data(df_: pd.DataFrame, var1: str, *, min_count: int = MIN_COUNT
         raise ValueError("No grouped count data were created. Check filtering and coding.")
 
     input1 = pd.concat(groups, ignore_index=True)
+    n_cells, n_cases = len(input1), int(input1["count"].sum())
     input1 = input1.loc[input1["count"] >= min_count].copy()
+    # Manuscript-facing number (M1 R2 standard: state what the cell threshold
+    # removes): log cells and cases dropped by the min_count rule.
+    LOG.info("min_count=%d on %s: cells %d -> %d, cases %d -> %d (dropped %d, %.1f%%)",
+             min_count, var1, n_cells, len(input1), n_cases, int(input1["count"].sum()),
+             n_cases - int(input1["count"].sum()),
+             100.0 * (n_cases - int(input1["count"].sum())) / max(n_cases, 1))
     input1 = input1.sort_values([var1, "bed_share", "smoke", "preterm"]).reset_index(drop=True)
     return input1
 

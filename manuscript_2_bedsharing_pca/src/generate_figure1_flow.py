@@ -24,6 +24,7 @@ USAGE
 from __future__ import annotations
 
 import argparse
+import re
 import logging
 from pathlib import Path
 
@@ -55,13 +56,49 @@ def _text_flow(audit: pd.DataFrame, pops: dict) -> str:
     return "\n".join(lines)
 
 
-def _draw(audit: pd.DataFrame, pops: dict, out_png: Path, out_tiff: Path) -> None:
+# Reader-facing box labels for the published figure (Ed Mitchell, M1 R2: no
+# pipeline step numbers or variable names such as "infageweeks <= 1" in a
+# figure). Keyed by the step-number prefix of the audit-trail step string.
+# --raw-labels restores the audit-trail strings for debugging.
+_READER_LABELS = {
+    "0b": "Death year outside 2008 to 2019",
+    "1": "Postnatal age at death missing",
+    "2": "Implausible postnatal age at death",
+    "3": "Death at 7 to 13 days of age",
+    "4a": "Gestational age flagged unknown",
+    "4": "Gestational age missing",
+    "5": "Implausible gestational age",
+    "6": "Gestational age below 20 weeks",
+    "9": "PCA below 36 weeks",
+    "10": "PCA above 90 weeks",
+    "11": "Maternal smoking status missing",
+    "12": "Infant sex missing",
+    "13": "Bed-sharing status missing",
+    "14": "Other analytic field missing",
+}
+
+
+def _reader_label(step: str, first_week_cut: int | None = None) -> str:
+    m = re.match(r"\s*(\d+[a-z]?)\.", step)
+    key = m.group(1) if m else ""
+    if key == "3":
+        cut = first_week_cut
+        if cut is None:
+            mm = re.search(r"infageweeks <= (\d+)", step)
+            cut = int(mm.group(1)) if mm else 1
+        return "Death before 7 days of age" if cut == 0 else f"Death at 7 to {7 * (cut + 1) - 1} days of age"
+    return _READER_LABELS.get(key, step)
+
+
+def _draw(audit: pd.DataFrame, pops: dict, out_png: Path, out_tiff: Path,
+          raw_labels: bool = False) -> None:
     steps = []
-    steps.append(("Start: NCFRP SUID cases", int(audit.iloc[0]["n_after"]), None))
+    steps.append(("NCFRP SUID dataset", int(audit.iloc[0]["n_after"]), None))
     for _, r in audit.iloc[1:].iterrows():
         if int(r["n_removed"]) == 0:
             continue
-        steps.append((str(r["step"]), int(r["n_after"]), int(r["n_removed"])))
+        label = str(r["step"]) if raw_labels else "Excluded: " + _reader_label(str(r["step"]))
+        steps.append((label, int(r["n_after"]), int(r["n_removed"])))
 
     n = len(steps)
     fig, ax = plt.subplots(figsize=(9, 1.15 * n + 2))
@@ -84,11 +121,12 @@ def _draw(audit: pd.DataFrame, pops: dict, out_png: Path, out_tiff: Path) -> Non
             ax.annotate("", xy=(7.0, y), xytext=(6.0, y),
                         arrowprops=dict(arrowstyle="-|>", color="#7a4a33"))
 
-    y0 = 0.7
+    y0 = 0.45
     ax.text(3.5, y0 + 0.55,
             f"Analytic cohort  N = {pops['full']:,}\n"
-            f"early n = {pops['early']:,}   peak (set aside) n = {pops['peak']:,}   "
-            f"late n = {pops['late']:,}",
+            f"Early window (PCA <43 wk) n = {pops['early']:,}\n"
+            f"Peak interval (PCA 43 to 46 wk, described only) n = {pops['peak']:,}\n"
+            f"Late window (PCA \u226547 wk) n = {pops['late']:,}",
             ha="center", va="center", fontsize=9, fontweight="bold")
 
     fig.tight_layout()
@@ -101,6 +139,11 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--workdir", type=Path, default=Path("."))
+    p.add_argument("--out-dir", type=Path, default=None,
+                   help="write figure1_flow.txt and Figure1_flow.{png,tiff} here instead of "
+                        "under --workdir (use to regenerate from a frozen bundle without touching it)")
+    p.add_argument("--raw-labels", action="store_true",
+                   help="box labels = audit-trail step strings (debug); default = reader-facing labels")
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(message)s",
                         datefmt="%H:%M:%S")
@@ -117,13 +160,19 @@ def main(argv: list[str] | None = None) -> int:
             "late": int(pr["late_n"]), "peak": int(pr["peak_excluded_n"])}
 
     txt = _text_flow(audit, pops)
-    out_txt = args.workdir / "output_data" / "ncfrp" / "figure1_flow.txt"
+    if args.out_dir is not None:
+        args.out_dir.mkdir(parents=True, exist_ok=True)
+        out_txt = args.out_dir / "figure1_flow.txt"
+        fig_dir = args.out_dir
+    else:
+        out_txt = args.workdir / "output_data" / "ncfrp" / "figure1_flow.txt"
+        fig_dir = args.workdir / "output_figures" / "ncfrp"
     out_txt.write_text(txt)
     print(txt)
 
-    fig_dir = args.workdir / "output_figures" / "ncfrp"
     fig_dir.mkdir(parents=True, exist_ok=True)
-    _draw(audit, pops, fig_dir / "Figure1_flow.png", fig_dir / "Figure1_flow.tiff")
+    _draw(audit, pops, fig_dir / "Figure1_flow.png", fig_dir / "Figure1_flow.tiff",
+          raw_labels=args.raw_labels)
     LOG.info("Wrote %s and Figure1_flow.png/.tiff", out_txt)
     return 0
 
