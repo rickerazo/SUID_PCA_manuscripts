@@ -92,16 +92,26 @@ def bfed_group(series: pd.Series, yes_code: float, no_code: float) -> pd.Series:
     return g
 
 
+def cohort_group(cohort: pd.DataFrame, args) -> pd.Series:
+    """Breastfeeding group from the loader output itself. load_ncfrp_data()
+    lowercases column names and resets the index, so never join on index."""
+    col = [c for c in cohort.columns if c.lower() == args.bfed_col.lower()]
+    if not col:
+        raise KeyError(f"{args.bfed_col} not carried through load_ncfrp_data()")
+    return bfed_group(cohort[col[0]], args.yes_code, args.no_code)
+
+
 def missingness_report(raw: pd.DataFrame, cohort: pd.DataFrame, group: pd.Series,
                        args, outdir: Path) -> pd.DataFrame:
-    """Share of the ANALYTIC cohort by breastfeeding group, overall and by strata."""
+    """Share of the ANALYTIC cohort by breastfeeding group, overall and by strata.
+    `group` must be aligned to `cohort` (use cohort_group)."""
     c = cohort.copy()
-    c["bfed"] = group.loc[c.index].values
+    c["bfed"] = group.values
     c["window"] = np.where(c["pca"] < args.peak1, "early (<43)",
                            np.where(c["pca"] >= args.peak2, "late (>=47)", "peak (43-46)"))
-    ycol = [k for k in raw.columns if k.lower() == "infdodyear"]
+    ycol = [k for k in c.columns if k.lower() == "infdodyear"]
     if ycol:
-        c["death_year"] = raw.loc[c.index, ycol[0]].values
+        c["death_year"] = c[ycol[0]].astype(int)
     strata = [("overall", None), ("bed_share", "bed_share"), ("maternal_smoking", "cig_rec"),
               ("preterm", "preterm"), ("sex", "sex"), ("window", "window")]
     if "death_year" in c:
@@ -197,7 +207,8 @@ def run_pipeline(case_csv: Path, exposure_dir: Path, run_dir: Path, args) -> Non
     with open(run_dir / "pipeline.log", "w") as log:
         rc = subprocess.call(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=str(HERE.parent))
     if rc != 0:
-        raise RuntimeError(f"pipeline failed for {run_dir} (rc={rc}); see pipeline.log")
+        LOG.error("pipeline exited %d for %s (see pipeline.log); using whatever outputs it wrote "
+                  "(the windowed models are written before the GAM)", rc, run_dir)
 
 
 def read_run(run_dir: Path) -> dict:
@@ -258,7 +269,7 @@ def compare(runs: dict[str, dict], outdir: Path, tag: str) -> pd.DataFrame:
 
 
 def pca_distribution(cohort: pd.DataFrame, group: pd.Series, outdir: Path) -> None:
-    c = cohort.copy(); c["bfed"] = group.loc[c.index].values
+    c = cohort.copy(); c["bfed"] = group.values
     rows = []
     for bs in ("Y", "N"):
         py = c.loc[(c["bed_share"] == bs) & (c["bfed"] == "Y"), "pca"]
@@ -303,6 +314,7 @@ def main(argv=None) -> int:
     p.add_argument("--gam-alpha-grid", type=int, default=0)
     p.add_argument("--national-offsets-only", action="store_true")
     p.add_argument("--skip-runs", action="store_true", help="rebuild comparisons from existing run_* folders")
+    p.add_argument("--reuse", action="store_true", help="skip pipeline runs whose outputs already exist")
     args = p.parse_args(argv)
     args.outdir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(message)s", datefmt="%H:%M:%S",
@@ -319,8 +331,10 @@ def main(argv=None) -> int:
     cohort, _ = pipe.load_ncfrp_data(args.data_path, pca_min=args.pca_min, pca_max=args.pca_max,
                                      first_week_cut=args.first_week_cut, year_min=args.year_min,
                                      year_max=args.year_max, audit_csv=None)
-    miss = missingness_report(raw, cohort, group, args, args.outdir)
-    pca_distribution(cohort, group, args.outdir)
+    cgroup = cohort_group(cohort, args)
+    LOG.info("%s in the ANALYTIC cohort (n=%d): %s", col[0], len(cohort), cgroup.value_counts().to_dict())
+    miss = missingness_report(raw, cohort, cgroup, args, args.outdir)
+    pca_distribution(cohort, cgroup, args.outdir)
 
     # subset case files
     subsets = {"ALL": raw, "Y": raw[group == "Y"], "N": raw[group == "N"], "U": raw[group == "U"], "K": raw[group.isin(["Y", "N"])]}
@@ -339,8 +353,11 @@ def main(argv=None) -> int:
         runs = {}
         for g, exp_dir in dmap.items():
             run_dir = args.outdir / f"run_{g}_{tag}"
-            if not args.skip_runs:
+            done = (run_dir / "output_data" / "ncfrp" / "all_late_irr.csv").exists()
+            if not args.skip_runs and not (args.reuse and done):
                 run_pipeline(files[g], Path(exp_dir), run_dir, args)
+            elif done:
+                LOG.info("reusing existing outputs in %s", run_dir)
             runs[g] = read_run(run_dir)
         if tag == "national" and runs.get("ALL", {}).get("early") is not None:
             e = runs["ALL"]["early"].loc["bed_share", "IRR"]; l = runs["ALL"]["late"].loc["bed_share", "IRR"]
