@@ -279,6 +279,25 @@ decision, not a pipeline one.
   sensitivity; the summary notes the windowed >=4-wk aggregation + NB dispersion
   + GAM smoothing as why it does not touch the inference.
 
+- `src/generate_supp_firstweek_table.py` (NOT in run_all.sh - it compares two
+  runs) -> `<outdir>/supp_table_firstweek_sensitivity.{csv,md,xlsx}`. Manuscript
+  Supplementary Table 3: early/late/GAM IRRs under the primary rule (deaths at
+  7-13 d excluded, joint offsets) vs the `FIRST_WEEK_CUT=0` run (retained) vs
+  the primary run's marginal offsets. Pass the three `output_data/ncfrp`
+  directories explicitly, e.g. on the HPC after both runs exist:
+
+  ```
+  python src/generate_supp_firstweek_table.py \
+      --primary-dir     ../manuscript2_pre_v7/out_joint/output_data/ncfrp \
+      --sensitivity-dir out_joint/output_data/ncfrp \
+      --marginal-dir    ../manuscript2_pre_v7/out_marginal/output_data/ncfrp \
+      --outdir output_data/ncfrp
+  ```
+
+  The script refuses to write if the two joint runs differ in the late window
+  (they must be identical: the export has no deaths before day 7, so the
+  sensitivity run only adds days 7-13, all below PCA 47). Reads saved CSVs only.
+
 ## 9. Hand back
 
 Copy `output_data/`, `output_figures/`, and `RUN_MANIFEST.md` back for review
