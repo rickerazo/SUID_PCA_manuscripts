@@ -298,6 +298,34 @@ decision, not a pipeline one.
   (they must be identical: the export has no deaths before day 7, so the
   sensitivity run only adds days 7-13, all below PCA 47). Reads saved CSVs only.
 
+## 8b. Breastfeeding sensitivity analysis (A/B design; not in run_all.sh)
+
+`src/bfed_sensitivity.py` reruns the ENTIRE pipeline with the case file filtered
+on NCFRP `INF3breast` before any cleaning (Y = ever breastfed, N = never,
+U = unknown, K = known, ALL = reproduction check), compares Y vs N (and K vs U)
+on every windowed term and the GAM main effects with a Wald test on the
+log-IRR difference, and reports the share of the analytic cohort with unknown
+breastfeeding status (overall and by bed sharing, smoking, preterm, sex,
+window, death year). Y/N models get breastfeeding-specific offsets (joint
+smoke x preterm from denominator rows with the same `bfed`; bed-sharing
+prevalence from PRAMS respondents with the same `brstfed`), plus a national-
+offset check. Run after `run_all.sh` (needs `output_data/risk_exposure/`):
+
+```
+python src/bfed_sensitivity.py \
+    --data-path standardized/NCFRP_SCH_LR_BW_pop.csv \
+    --denominator standardized/consolidated/denominator.parquet \
+    --prams standardized/PRAMS/prams.parquet \
+    --national-exposure-dir output_data/risk_exposure \
+    --outdir out_bfed --pca-min 36 --pca-max 90 --year-min 2008 --year-max 2019 --first-week-cut 1
+```
+
+Outputs in `out_bfed/`: `bfed_sensitivity_summary.md`, `bfed_comparison_{bfed,national}.{csv,md}`,
+`bfed_missingness.{csv,md}`, `bfed_pca_distribution.{csv,png}`, `offset_proportions.csv`,
+`run_<group>_<offsets>/` (standard pipeline outputs per subset), `bfed_sensitivity.log`.
+The log states whether the ALL run reproduces the primary bed-sharing IRRs (PASS/FAIL).
+Copy `out_bfed/` back as its own `AJE/v<N>/` bundle.
+
 ## 9. Hand back
 
 Copy `output_data/`, `output_figures/`, and `RUN_MANIFEST.md` back for review

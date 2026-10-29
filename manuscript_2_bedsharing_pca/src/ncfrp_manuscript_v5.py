@@ -344,7 +344,7 @@ def load_ncfrp_data(
         trail.record(f"10. exclude PCA > {pca_max}", df)
 
     # 11. maternal smoking
-    df["cig_rec"] = np.nan
+    df["cig_rec"] = pd.Series(np.nan, index=df.index, dtype=object)  # object: str codes assigned below (pandas>=3 safe)
     df.loc[df["smoker"] == 1, "cig_rec"] = "Y"
     df.loc[df["smoker"] == 2, "cig_rec"] = "N"
     df["smoke"] = np.nan
@@ -354,14 +354,14 @@ def load_ncfrp_data(
     trail.record("11. exclude missing/invalid maternal smoking", df)
 
     # 12. infant sex
-    df["sex"] = np.nan
+    df["sex"] = pd.Series(np.nan, index=df.index, dtype=object)  # object: str codes assigned below (pandas>=3 safe)
     df.loc[df["infsex"] == 1, "sex"] = "M"
     df.loc[df["infsex"] == 2, "sex"] = "F"
     df = df.loc[df["sex"].isin(["M", "F"])].copy()
     trail.record("12. exclude missing/invalid infant sex", df)
 
     # 13. bed sharing
-    df["bed_share"] = np.nan
+    df["bed_share"] = pd.Series(np.nan, index=df.index, dtype=object)  # object: str codes assigned below (pandas>=3 safe)
     df.loc[df["bed_sharing"] == 1, "bed_share"] = "Y"
     df.loc[df["bed_sharing"] == 2, "bed_share"] = "N"
     df["bed_share_bin"] = np.nan
