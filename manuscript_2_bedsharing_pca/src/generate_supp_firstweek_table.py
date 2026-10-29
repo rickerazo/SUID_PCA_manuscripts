@@ -9,8 +9,12 @@ Reads ONLY saved pipeline outputs (nothing re-fit, nothing hand-typed):
                      (run_all.sh 36 90 2008 2019 1  -> deaths at 7-13 d excluded)
   --sensitivity-dir  out_joint/output_data/ncfrp of the first-week-cut run
                      (run_all.sh 36 90 2008 2019 0  -> deaths at 7-13 d retained)
-  --marginal-dir     out_marginal/output_data/ncfrp of the primary run
-                     (same cohort as --primary-dir, marginal instead of joint offsets)
+  --marginal-dir     (optional) out_marginal/output_data/ncfrp of the primary run
+                     (same cohort as --primary-dir, marginal instead of joint offsets).
+                     Omit it for the two-column table used in the manuscript
+                     (decision 2026-10-29: the marginal-offset comparison moves the
+                     smoking/preterm IRRs but not bed sharing, and was judged more
+                     noise than signal for a bed-sharing paper).
 
 Each directory must hold all_early_irr.csv, all_late_irr.csv, all_gam_exp.csv and
 two_population_Ns.csv. Writes <outdir>/<stem>.{csv,md,xlsx}.
@@ -25,8 +29,8 @@ Example (laptop, against the frozen bundles):
   python src/generate_supp_firstweek_table.py \
       --primary-dir     AJE/v6/out_joint/output_data/ncfrp \
       --sensitivity-dir AJE/v7/out_joint/output_data/ncfrp \
-      --marginal-dir    AJE/v6/out_marginal/output_data/ncfrp \
       --outdir . --stem supp_table_firstweek_sensitivity
+  (add --marginal-dir AJE/v6/out_marginal/output_data/ncfrp for the 3-column variant)
 """
 from __future__ import annotations
 
@@ -69,8 +73,10 @@ def read_ns(path: Path) -> dict[str, int]:
     return {k: int(v) for k, v in row.items()}
 
 
-def build(primary: Path, sensitivity: Path, marginal: Path) -> tuple[pd.DataFrame, str]:
-    runs = {"primary": primary, "sensitivity": sensitivity, "marginal": marginal}
+def build(primary: Path, sensitivity: Path, marginal: Path | None) -> tuple[pd.DataFrame, str]:
+    runs = {"primary": primary, "sensitivity": sensitivity}
+    if marginal is not None:
+        runs["marginal"] = marginal
     early = {k: read_irr(d / "all_early_irr.csv") for k, d in runs.items()}
     late = {k: read_irr(d / "all_late_irr.csv") for k, d in runs.items()}
     gam = {k: read_irr(d / "all_gam_exp.csv") for k, d in runs.items()}
@@ -85,41 +91,42 @@ def build(primary: Path, sensitivity: Path, marginal: Path) -> tuple[pd.DataFram
                 "these should be identical for the first-week-cut comparison. Check the paths.")
     if ns["primary"]["late_n"] != ns["sensitivity"]["late_n"]:
         raise SystemExit("late_n differs between --primary-dir and --sensitivity-dir; check the paths.")
-    if ns["primary"] != ns["marginal"]:
+    if marginal is not None and ns["primary"] != ns["marginal"]:
         raise SystemExit("--marginal-dir cohort Ns differ from --primary-dir; the marginal run must be "
                          "the same cohort as the primary run.")
 
-    cols = ["Term",
-            "Primary (joint offsets; deaths at 7-13 days excluded)",
-            "Deaths at 7-13 days retained (joint offsets)",
-            "Marginal offsets (deaths at 7-13 days excluded)"]
+    keys = ["primary", "sensitivity"] + (["marginal"] if marginal is not None else [])
+    cols = ["Term", "Primary (deaths at 7-13 days excluded)", "Deaths at 7-13 days retained"]
+    if marginal is not None:
+        cols = ["Term", "Primary (joint offsets; deaths at 7-13 days excluded)",
+                "Deaths at 7-13 days retained (joint offsets)",
+                "Marginal offsets (deaths at 7-13 days excluded)"]
     rows: list[list[str]] = []
 
     def block(title: str, est: dict, terms: list[str]) -> None:
-        rows.append([title, "", "", ""])
+        rows.append([title] + [""] * len(keys))
         for t in terms:
             d = 3 if t == "pca" else 2
-            rows.append([TERM_LABELS[t], fmt(est["primary"][t], d), fmt(est["sensitivity"][t], d),
-                         fmt(est["marginal"][t], d)])
+            rows.append([TERM_LABELS[t]] + [fmt(est[k][t], d) for k in keys])
 
     block("Early window (PCA <43 weeks)", early, EARLY_TERMS)
     block("Late window (PCA 47-90 weeks)", late, LATE_TERMS)
     block("Full-curve GAM (PCA 36-90 weeks)", gam, GAM_TERMS)
-    rows.append(["Cohort", "", "", ""])
+    rows.append(["Cohort"] + [""] * len(keys))
     for label, key in [("Analytic N", "full_analytic_N"), ("Early-window n", "early_n"),
                        ("Late-window n", "late_n")]:
-        rows.append([label] + [f"{ns[k][key]:,}" for k in ("primary", "sensitivity", "marginal")])
+        rows.append([label] + [f"{ns[k][key]:,}" for k in keys])
 
     tab = pd.DataFrame(rows, columns=cols)
     added = ns["sensitivity"]["full_analytic_N"] - ns["primary"]["full_analytic_N"]
     note = ("Note: values are incidence rate ratios (95% CI). The NCFRP export contains no deaths "
             "before 7 days of age, so the sensitivity run retains only the deaths at 7-13 days "
             f"({added:,} enter the analytic cohort); all fall below PCA 47 weeks, so the late-window "
-            "estimates are identical under both rules. Marginal offsets use the primary cohort with "
-            "the smoking and preterm denominators taken from marginal rather than cross-classified "
-            "live-birth distributions. Values trace to "
-            f"{primary} (primary), {sensitivity} (age-at-death sensitivity) and {marginal} "
-            "(offset sensitivity).")
+            "estimates are identical under both rules. Values trace to "
+            f"{primary} (primary) and {sensitivity} (age-at-death sensitivity)"
+            + (f"; marginal offsets use the primary cohort with the smoking and preterm denominators "
+               f"taken from marginal rather than cross-classified live-birth distributions, from {marginal}."
+               if marginal is not None else "."))
     return tab, note
 
 
@@ -135,7 +142,7 @@ def write(tab: pd.DataFrame, note: str, outdir: Path, stem: str) -> None:
     with pd.ExcelWriter(xlsx_path, engine="openpyxl") as xw:
         tab.to_excel(xw, index=False, sheet_name="Sensitivity")
         ws = xw.sheets["Sensitivity"]
-        for col in ("A", "B", "C", "D"):
+        for col in ("A", "B", "C", "D")[: len(tab.columns)]:
             ws.column_dimensions[col].width = 34
         ws.cell(row=len(tab) + 3, column=1, value=note)
     for p in (csv_path, outdir / f"{stem}.md", xlsx_path):
@@ -147,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--primary-dir", type=Path, required=True)
     p.add_argument("--sensitivity-dir", type=Path, required=True)
-    p.add_argument("--marginal-dir", type=Path, required=True)
+    p.add_argument("--marginal-dir", type=Path, default=None)
     p.add_argument("--outdir", type=Path, default=Path("output_data/ncfrp"))
     p.add_argument("--stem", default="supp_table_firstweek_sensitivity")
     args = p.parse_args(argv)
