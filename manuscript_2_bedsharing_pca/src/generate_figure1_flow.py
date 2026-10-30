@@ -93,11 +93,11 @@ def _reader_label(step: str, first_week_cut: int | None = None) -> str:
 def _draw(audit: pd.DataFrame, pops: dict, out_png: Path, out_tiff: Path,
           raw_labels: bool = False) -> None:
     steps = []
-    steps.append(("NCFRP SUID dataset", int(audit.iloc[0]["n_after"]), None))
+    steps.append(("NCFRP SUID dataset, 2004 to 2019", int(audit.iloc[0]["n_after"]), None))
     for _, r in audit.iloc[1:].iterrows():
         if int(r["n_removed"]) == 0:
             continue
-        label = str(r["step"]) if raw_labels else "Excluded: " + _reader_label(str(r["step"]))
+        label = str(r["step"]) if raw_labels else _reader_label(str(r["step"]))
         steps.append((label, int(r["n_after"]), int(r["n_removed"])))
 
     n = len(steps)
@@ -110,15 +110,18 @@ def _draw(audit: pd.DataFrame, pops: dict, out_png: Path, out_tiff: Path,
         y = n + 1 - i
         ax.add_patch(plt.Rectangle((1, y - 0.35), 5.0, 0.7, fill=True,
                                    facecolor="#eef3fb", edgecolor="#33507a"))
-        ax.text(3.5, y, f"{label}\nN = {remaining:,}", ha="center", va="center", fontsize=9)
-        if i < n - 1:
-            ax.annotate("", xy=(3.5, y - 0.45), xytext=(3.5, y - 0.55),
+        main_txt = (f"{label}\nN = {remaining:,}" if removed is None
+                    else f"Remaining\nN = {remaining:,}")
+        ax.text(3.5, y, main_txt, ha="center", va="center", fontsize=9)
+        if i < n - 1:   # downward arrow to the next box (was drawn pointing up)
+            ax.annotate("", xy=(3.5, y - 0.65), xytext=(3.5, y - 0.37),
                         arrowprops=dict(arrowstyle="-|>", color="#33507a"))
         if removed is not None:
-            ax.add_patch(plt.Rectangle((7.0, y - 0.28), 2.6, 0.56, fill=True,
+            ax.add_patch(plt.Rectangle((6.6, y + 0.22), 3.3, 0.66, fill=True,
                                        facecolor="#faf0ee", edgecolor="#7a4a33"))
-            ax.text(8.3, y, f"excluded\nn = {removed:,}", ha="center", va="center", fontsize=8)
-            ax.annotate("", xy=(7.0, y), xytext=(6.0, y),
+            ax.text(8.25, y + 0.55, f"Excluded: {label}\nn = {removed:,}", ha="center",
+                    va="center", fontsize=8)
+            ax.annotate("", xy=(6.6, y + 0.55), xytext=(3.5, y + 0.55),
                         arrowprops=dict(arrowstyle="-|>", color="#7a4a33"))
 
     y0 = 0.45
