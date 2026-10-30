@@ -284,18 +284,18 @@ def plot_varycoef_curve(input1: pd.DataFrame, title: str, res, design_info: dict
 
     ax = axes[0]
     ax.plot(obs_ns[var1], obs_ns["count"], marker="v", linewidth=.5,
-            label="Observed non-bed sharing", color="blue")
+            label="Observed, not bed sharing", color="blue")
     ax.plot(obs_bs[var1], obs_bs["count"], marker="^", linewidth=.5,
-            label="Observed bed sharing", color="orange")
+            label="Observed, bed sharing", color="orange")
     ax.plot(pca_grid, mu_ns, linewidth=3, linestyle="-.",
-            label="Predicted mean non-bed sharing", color="blue")
+            label="Predicted mean, not bed sharing", color="blue")
     ax.plot(pca_grid, mu_bs, linewidth=3, linestyle="--",
-            label="Predicted mean bed sharing", color="orange")
+            label="Predicted mean, bed sharing", color="orange")
     ax.fill_between(pca_grid, lo_ns, hi_ns, alpha=0.15, color="blue")
     ax.fill_between(pca_grid, lo_bs, hi_bs, alpha=0.15, color="orange")
-    ax.set_xlabel("PCA (weeks)")
-    ax.set_ylabel("SUID case count")
-    ax.set_title("A. Varying-coefficient GAM: SUID incidence by sleep environment")
+    ax.set_xlabel("Postconceptional age (weeks)")
+    ax.set_ylabel("Weekly SUID case count")
+    ax.set_title("A", loc="left", fontsize=15, fontweight="bold")
     ax.set_xlim(pca_min - 1, pca_max)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -305,16 +305,15 @@ def plot_varycoef_curve(input1: pd.DataFrame, title: str, res, design_info: dict
     ratio = np.divide(mu_bs, mu_ns, out=np.full_like(mu_bs, np.nan, dtype=float),
                       where=mu_ns > 0)
     ax2.plot(pca_grid, ratio, linewidth=3, linestyle="--", color="k",
-             label="Fitted bed-sharing / non-sharing ratio")
+             label="Fitted incidence rate ratio, bed sharing vs not")
     with np.errstate(divide="ignore", invalid="ignore"):
         log_lo = np.log(lo_bs) - np.log(hi_ns)
         log_hi = np.log(hi_bs) - np.log(lo_ns)
     ax2.fill_between(pca_grid, np.exp(log_lo), np.exp(log_hi), alpha=0.15, color="k")
     ax2.axhline(1.0, linestyle="--", linewidth=1.2, alpha=0.8)
-    ax2.set_xlabel("PCA (weeks)")
-    ax2.set_ylabel("Fitted incidence rate ratio (bed sharing vs not)")
-    ax2.set_title("B. Bed-sharing vs non-sharing fitted rate ratio across PCA "
-                  "(varying-coefficient model)")
+    ax2.set_xlabel("Postconceptional age (weeks)")
+    ax2.set_ylabel("Incidence rate ratio")
+    ax2.set_title("B", loc="left", fontsize=15, fontweight="bold")
     ax2.set_xlim(pca_min - 1, pca_max)
     ax2.spines["top"].set_visible(False)
     ax2.spines["right"].set_visible(False)
@@ -328,6 +327,7 @@ def plot_varycoef_curve(input1: pd.DataFrame, title: str, res, design_info: dict
     fig.savefig(VARYCOEF_FIG_DIR / f"Figure3b_{title}.png", dpi=300, bbox_inches="tight")
     fig.savefig(VARYCOEF_FIG_DIR / f"Figure3b_{title}.tiff", dpi=300, format="tiff",
                 bbox_inches="tight")
+    fig.savefig(VARYCOEF_FIG_DIR / f"Figure3b_{title}.pdf", bbox_inches="tight")
     plt.close(fig)
 
 

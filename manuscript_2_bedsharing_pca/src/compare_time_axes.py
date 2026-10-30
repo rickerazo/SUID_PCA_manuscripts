@@ -245,22 +245,24 @@ def main(argv: list[str] | None = None) -> int:
 
     # ---- 2. observed vs fitted, both axes ---------------------------
     fig, axes = plt.subplots(1, 2, figsize=(13, 5.5), constrained_layout=True)
-    for ax, curve, var1, title in [(axes[0], curve_pca, "pca", "A. PCA axis"),
-                                   (axes[1], curve_ca, "infageweeks", "B. Chronological age axis")]:
+    for ax, curve, var1, title, xlab in [
+            (axes[0], curve_pca, "pca", "A", "Postconceptional age (weeks)"),
+            (axes[1], curve_ca, "infageweeks", "B", "Postnatal age (weeks)")]:
         obs = curve.groupby(var1, as_index=False)["count"].sum().sort_values(var1)
         ax.plot(obs[var1], obs["count"], marker="o", markersize=3, linewidth=0,
-                alpha=0.3, label="observed (summed)")
+                alpha=0.3, label="Observed weekly count")
         ma = obs["count"].rolling(args.smooth_window, center=True, min_periods=1).mean()
         ax.plot(obs[var1], ma, linewidth=2,
-                label=f"{args.smooth_window}-wk moving average (display only)")
-        ax.set_title(title)
-        ax.set_xlabel("weeks")
-        ax.set_ylabel("SUID case count")
+                label=f"{args.smooth_window}-week moving average")
+        ax.set_title(title, loc="left", fontsize=15, fontweight="bold")
+        ax.set_xlabel(xlab)
+        ax.set_ylabel("Weekly SUID case count")
         ax.spines[["top", "right"]].set_visible(False)
         ax.legend(frameon=False)
     fig.savefig(args.outdir / "observed_by_axis.png", dpi=300, bbox_inches="tight")
     fig.savefig(args.outdir / "observed_by_axis.tiff", dpi=300, format="tiff",
                 bbox_inches="tight")
+    fig.savefig(args.outdir / "observed_by_axis.pdf", bbox_inches="tight")
     plt.close(fig)
 
     # ---- 3. PCA vs chronological age at death ----------------------

@@ -45,7 +45,7 @@ CAUSE_LABELS = {1: "Undetermined", 2: "Accidental suffocation / strangulation",
 
 # Section headings other table scripts omit when that variable is the stratifier.
 SEX_SECTION = "Infant sex"
-BW_SECTION = "Birthweight (grams; LR_BW-imputed where missing)"
+BW_SECTION = "Birthweight, g\u1d43"
 BW_COL = "inf3biwt"
 
 
@@ -107,8 +107,7 @@ def build_cohort_table(
             rec[col] = _fmt((mask & sm).sum(), denom)
         rows.append(rec)
 
-    section("Case counts")
-    row("Total SUID cases", pd.Series(True, index=data.index))
+    # (the column headers already carry the N; no separate "total" row)
 
     section(SEX_SECTION)
     row("Male", data["sex"].eq("M"))
@@ -121,11 +120,14 @@ def build_cohort_table(
         row("No", bs.eq("N"))
 
     if "caucausedth" in data.columns:
-        section("Cause of death (CAUcausedth)")
+        section("Cause of death category\u1d47")
         cau = pd.to_numeric(data["caucausedth"], errors="coerce")
         for code, label in CAUSE_LABELS.items():
-            row(f"{label} ({code})", cau.eq(code))
-        row("Other / not in map", ~cau.isin(list(CAUSE_LABELS)))
+            if cau.eq(code).any():          # no all-zero rows
+                row(label, cau.eq(code))
+        other = ~cau.isin(list(CAUSE_LABELS))
+        if other.any():
+            row("Other", other)
 
     section("Maternal smoking during pregnancy")
     row("Yes", data["cig_rec"].eq("Y"))
@@ -133,15 +135,15 @@ def build_cohort_table(
 
     section("Gestational age at birth")
     ga = pd.to_numeric(data["inf3gestage"], errors="coerce")
-    row("Extremely/very preterm, <32 weeks", ga < 32)
-    row("Moderate/late preterm, 32-36 weeks", (ga >= 32) & (ga < 37))
-    row("Term, >=37 weeks", ga >= 37)
+    row("<32 weeks", ga < 32)
+    row("32 to 36 weeks", (ga >= 32) & (ga < 37))
+    row("\u226537 weeks", ga >= 37)
 
-    section("Postconceptional age window")
+    section("Postconceptional age at death")
     pca = pd.to_numeric(data["pca"], errors="coerce")
-    row(f"Early rising, PCA < {peak1}", pca < peak1)
-    row(f"Peak/transition, {peak1}-{peak2 - 1}", (pca >= peak1) & (pca < peak2))
-    row(f"Late declining, PCA >= {peak2}", pca >= peak2)
+    row(f"<{peak1} weeks (early window)", pca < peak1)
+    row(f"{peak1} to {peak2 - 1} weeks (peak interval)", (pca >= peak1) & (pca < peak2))
+    row(f"\u2265{peak2} weeks (late window)", pca >= peak2)
 
     section("Postnatal age at death")
     wk = pd.to_numeric(data["infageweeks"], errors="coerce")
@@ -150,15 +152,16 @@ def build_cohort_table(
     row("1 to <2 months", (wk >= wpm) & (wk < 2 * wpm))
     row("2 to <4 months", (wk >= 2 * wpm) & (wk < 4 * wpm))
     row("4 to <6 months", (wk >= 4 * wpm) & (wk < 6 * wpm))
-    row(">=6 months", wk >= 6 * wpm)
+    row("\u22656 months", wk >= 6 * wpm)
 
     if BW_COL in data.columns:
         section(BW_SECTION)
         bw = pd.to_numeric(data[BW_COL], errors="coerce")
-        row("<2500", bw < 2500)
-        row("2500-3499", (bw >= 2500) & (bw < 3500))
-        row(">=3500", bw >= 3500)
-        row("Missing (no gestage/sex to impute)", bw.isna())
+        row("<2,500", bw < 2500)
+        row("2,500 to 3,499", (bw >= 2500) & (bw < 3500))
+        row("\u22653,500", bw >= 3500)
+        if bw.isna().any():
+            row("Missing", bw.isna())
 
     if "infdodyear" in data.columns:
         section("Year of death")
@@ -166,7 +169,7 @@ def build_cohort_table(
         for lo, hi in [(2004, 2007), (2008, 2011), (2012, 2015), (2016, 2019)]:
             m = (yr >= lo) & (yr <= hi)
             if m.any():   # drop bins outside the applied --year-min/--year-max window
-                row(f"{lo}-{hi}", m)
+                row(f"{lo} to {hi}", m)
 
     return pd.DataFrame(rows)
 

@@ -132,6 +132,7 @@ def _draw(audit: pd.DataFrame, pops: dict, out_png: Path, out_tiff: Path,
     fig.tight_layout()
     fig.savefig(out_png, dpi=300, bbox_inches="tight")
     fig.savefig(out_tiff, dpi=300, format="tiff", bbox_inches="tight")
+    fig.savefig(out_tiff.with_suffix(".pdf"), bbox_inches="tight")
     plt.close(fig)
 
 

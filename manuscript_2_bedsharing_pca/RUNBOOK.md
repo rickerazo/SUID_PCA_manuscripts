@@ -298,7 +298,7 @@ decision, not a pipeline one.
   (they must be identical: the export has no deaths before day 7, so the
   sensitivity run only adds days 7-13, all below PCA 47). Reads saved CSVs only.
 
-## 8b. Breastfeeding sensitivity analysis (A/B design; not in run_all.sh)
+## 8b. Breastfeeding sensitivity analysis (A/B design; run_all.sh step 7)
 
 `src/bfed_sensitivity.py` reruns the ENTIRE pipeline with the case file filtered
 on NCFRP `INF3breast` before any cleaning (Y = ever breastfed, N = never,
@@ -309,7 +309,8 @@ breastfeeding status (overall and by bed sharing, smoking, preterm, sex,
 window, death year). Y/N models get breastfeeding-specific offsets (joint
 smoke x preterm from denominator rows with the same `bfed`; bed-sharing
 prevalence from PRAMS respondents with the same `brstfed`), plus a national-
-offset check. Run after `run_all.sh` (needs `output_data/risk_exposure/`):
+offset check. `run_all.sh` runs it as step 7; to run it alone (needs
+`output_data/risk_exposure/`):
 
 ```
 python src/bfed_sensitivity.py \
@@ -326,7 +327,13 @@ Outputs in `out_bfed/`: `bfed_sensitivity_summary.md`, `bfed_comparison_{bfed,na
 The log states whether the ALL run reproduces the primary bed-sharing IRRs (PASS/FAIL).
 Copy `out_bfed/` back as its own `AJE/v<N>/` bundle.
 
+## 8c. Figure exports
+
+Every manuscript figure is written as `.tiff` (300 dpi), `.pdf` (vector), and
+`.png` (preview), with reader-facing titles, legends, and axis labels (no
+variable names, journal-style P values).
+
 ## 9. Hand back
 
-Copy `output_data/`, `output_figures/`, and `RUN_MANIFEST.md` back for review
+Copy `out_joint/`, `out_marginal/`, `out_bfed/`, and `RUN_MANIFEST.md` back for review
 against `AUDIT_FINDINGS.md` and for the reviewer-proofing memo.

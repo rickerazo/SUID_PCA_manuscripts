@@ -118,4 +118,19 @@ python "$SRC/compare_time_axes.py" \
     --year-min "$YEAR_MIN" --year-max "$YEAR_MAX" --offset-mode joint \
     --outdir out_joint/output_data/ncfrp/time_axes
 
-echo "== done. compare out_joint/ vs out_marginal/ ; hand back with RUN_MANIFEST.md =="
+echo "== 7. breastfeeding sensitivity analysis (A/B on NCFRP INF3breast; RUNBOOK 8b) =="
+# Reruns the whole pipeline on the breastfed / never / unknown / known subsets,
+# with breastfeeding-specific offsets for Y and N, and writes the missingness
+# table. Same PCA / year / first-week settings as the primary run.
+python "$SRC/bfed_sensitivity.py" \
+    --data-path "$DATA" \
+    --denominator "$DENOM" \
+    --prams "$PRAMS" \
+    --national-exposure-dir output_data/risk_exposure \
+    --outdir out_bfed \
+    --pca-min "$PCA_MIN" --pca-max "$PCA_MAX" \
+    --first-week-cut "$FIRST_WEEK_CUT" \
+    --year-min "$YEAR_MIN" --year-max "$YEAR_MAX"
+# -> out_bfed/bfed_sensitivity_summary.md, bfed_comparison_*.csv, bfed_missingness.csv
+
+echo "== done. compare out_joint/ vs out_marginal/ ; hand back out_joint/, out_marginal/, out_bfed/ and RUN_MANIFEST.md =="

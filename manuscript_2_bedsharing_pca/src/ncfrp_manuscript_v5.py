@@ -756,7 +756,7 @@ def plot_incidence_curves_pna_pca(case_df: pd.DataFrame, title: str,
     COLORS = {"N": "tab:blue", "Y": "tab:orange"}
 
     def _panel(ax, tbl, xvar, xlabel, panel_title):
-        for key, lbl in [("N", "Non-bed sharing"), ("Y", "Bed sharing")]:
+        for key, lbl in [("N", "Not bed sharing"), ("Y", "Bed sharing")]:
             sub = tbl.loc[tbl["bed_share"] == key].sort_values(xvar)
             ax.plot(sub[xvar], sub["rate_raw"], linestyle="none", marker="o",
                     markersize=3, alpha=0.22, color=COLORS[key])
@@ -769,9 +769,9 @@ def plot_incidence_curves_pna_pca(case_df: pd.DataFrame, title: str,
         ax.tick_params(labelsize=10)
 
     _panel(axes[0], pna_tbl, "infageweeks", "Postnatal age (weeks)",
-           "A. SUID incidence by postnatal age")
+           "Postnatal age scale")
     _panel(axes[1], pca_tbl, "pca", "Postconceptional age (weeks)",
-           "B. SUID incidence by PCA")
+           "Postconceptional age scale")
 
     # shared y-range (Ed E7). Use the smoothed max plus a robust raw quantile so
     # most raw dots are visible while the extreme month-reporting spikes clip.
@@ -782,17 +782,15 @@ def plot_incidence_curves_pna_pca(case_df: pd.DataFrame, title: str,
         ax.set_ylabel(f"Weekly SUID incidence per {int(rate_scale):,} live births",
                       fontsize=12)
     axes[0].legend(frameon=False, fontsize=10, loc="upper right")
-    axes[1].text(0.98, 0.02,
-                 f"line = centred moving average (A {w_pna}-wk, B {w_pca}-wk); "
-                 f"dots = raw weekly values",
-                 transform=axes[1].transAxes, ha="right", va="bottom",
-                 fontsize=7, color="0.4")
+    # The smoother/raw-dot explanation lives in the figure legend (caption), not
+    # on the plot: the in-panel note overlapped the panel B traces (M1 R2 / Ed).
     for ax, label in zip(axes, ["A", "B"]):
         ax.text(0.02, 0.98, label, transform=ax.transAxes, va="top", ha="left",
                 fontsize=14, fontweight="bold")
 
     fig.savefig(FIG_DIR / f"Figure2_{title}.tiff", dpi=300, format="tiff",
                 bbox_inches="tight")
+    fig.savefig(FIG_DIR / f"Figure2_{title}.pdf", bbox_inches="tight")
     fig.savefig(FIG_DIR / f"Figure2_{title}.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
 
@@ -806,14 +804,14 @@ TERM_LABELS = {
     "bed_share": "Bed sharing",
     "smoke": "Maternal smoking",
     "preterm": "Preterm birth",
-    "bed_share:smoke": "Bed sharing x Smoking",
-    "bed_share:preterm": "Bed sharing x Preterm",
+    "bed_share:smoke": "Bed sharing \u00d7 maternal smoking",
+    "bed_share:preterm": "Bed sharing \u00d7 preterm birth",
 }
 TERM_GROUPS = {
     "pca": "Developmental factor",
     "bed_share": "Sleep environment",
-    "smoke": "Perinatal / exposure factors",
-    "preterm": "Perinatal / exposure factors",
+    "smoke": "Covariates",
+    "preterm": "Covariates",
     "bed_share:smoke": "Interactions",
     "bed_share:preterm": "Interactions",
 }
@@ -830,39 +828,88 @@ def irr_table_from_csv(irr_csv: str, window_label: str) -> pd.DataFrame:
     raw = raw.rename(columns={"IRR": "rate_ratio", "IRR_ci_low": "rr_ci_low",
                               "IRR_ci_high": "rr_ci_high", "p_value": "pvalue"})
     raw["window"] = window_label
+    # journal-style P values (M1 R2 / Ed: no "0.0***" renderings)
+    raw["p_fmt"] = raw["pvalue"].map(format_p)
+    # PCA is a per-week ratio close to 1: three decimals, otherwise two
+    raw["est_ci_fmt"] = [(f"{e:.3f} ({lo:.3f}\u2013{hi:.3f})" if t == "pca" else
+                          f"{e:.2f} ({lo:.2f}\u2013{hi:.2f})") for t, e, lo, hi in
+                         zip(raw["term"], raw["rate_ratio"], raw["rr_ci_low"], raw["rr_ci_high"])]
     raw["term"] = pd.Categorical(raw["term"], categories=PREDICTOR_ORDER, ordered=True)
     return raw.sort_values("term").reset_index(drop=True)
 
 
+def format_p(p: float) -> str:
+    """AJE style: <.001, otherwise 2 decimals (3 below .01), no leading zero."""
+    if pd.isna(p):
+        return ""
+    if p < 0.001:
+        return "<.001"
+    return (f"{p:.3f}" if p < 0.01 else f"{p:.2f}").lstrip("0")
+
+
 def draw_nb_forest_panel(irr_csv: str, ax, title: str, xmin: float = 0.5, xmax: float = 25):
+    """Forest panel drawn directly with matplotlib (the forestplot library put
+    fixed-width gaps between its text columns and the plot). Reads the SAME
+    saved IRR table the model wrote (A4.30). Columns: label | IRR (95% CI) |
+    plot (log x) | P value. Group headers in bold."""
+    from matplotlib.ticker import FixedLocator, NullLocator, FuncFormatter
     df = irr_table_from_csv(irr_csv, title)
-    group_order = [g for g in ["Developmental factor", "Sleep environment",
-                               "Perinatal / exposure factors", "Interactions"]
-                   if g in set(df["group"])]
-    fp.forestplot(
-        dataframe=df, estimate="rate_ratio", ll="rr_ci_low", hl="rr_ci_high",
-        varlabel="variable", groupvar="group", group_order=group_order,
-        pval="pvalue", color_alt_rows=True, xlineval=1, ax=ax,
-        **{"ylabel": "Variables", "xlabel": "Adjusted incidence rate ratio", "title": title})
-    ax.axvline(1, color="gray", linestyle="--", alpha=0.8, linewidth=1.2)
+    groups = [g for g in ["Developmental factor", "Sleep environment",
+                          "Covariates", "Interactions"]
+              if g in set(df["group"])]
+    rows = []                       # (kind, text, row) top to bottom
+    for g in groups:
+        rows.append(("group", g, None))
+        for _, r in df.loc[df["group"] == g].iterrows():
+            rows.append(("term", r["variable"], r))
+    n = len(rows)
+    ys = list(range(n, 0, -1))
+    trans = ax.get_yaxis_transform()            # x in axes fraction, y in data
+    for (kind, text, r), y in zip(rows, ys):
+        if kind == "group":
+            ax.text(-1.30, y, text, transform=trans, ha="left", va="center",
+                    fontsize=10, fontweight="bold")
+            continue
+        ax.text(-1.25, y, text, transform=trans, ha="left", va="center", fontsize=10)
+        ax.text(-0.42, y, r["est_ci_fmt"], transform=trans, ha="left", va="center", fontsize=10)
+        ax.text(1.04, y, r["p_fmt"], transform=trans, ha="left", va="center", fontsize=10)
+        ax.plot([r["rr_ci_low"], r["rr_ci_high"]], [y, y], color="0.35", linewidth=1.4)
+        ax.plot([r["rate_ratio"]], [y], marker="s", markersize=6, color="#2f4f4f")
+    top = n + 0.9
+    ax.text(-0.42, top, "IRR (95% CI)", transform=trans, ha="left", va="center",
+            fontsize=10, fontweight="bold")
+    ax.text(1.04, top, "P value", transform=trans, ha="left", va="center",
+            fontsize=10, fontweight="bold")
+    ax.axvline(1, color="gray", linestyle="--", alpha=0.8, linewidth=1.0)
     ax.set_xscale("log")
     ax.set_xlim([xmin, xmax])
+    ax.set_ylim(0.4, n + 1.3)
+    ticks = [t for t in (0.5, 1, 2, 5, 10, 20) if xmin <= t <= xmax]
+    ax.xaxis.set_major_locator(FixedLocator(ticks))
+    ax.xaxis.set_minor_locator(NullLocator())
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
+    ax.set_yticks([])
+    for side in ("top", "right", "left"):
+        ax.spines[side].set_visible(False)
+    ax.set_xlabel("Adjusted incidence rate ratio (log scale)", fontsize=10)
     return ax
 
 
 def plot_nb_forest(early_irr_csv: str, late_irr_csv: str, title: str,
                    filename_prefix: str = "Figure4") -> None:
     FIG_DIR.mkdir(parents=True, exist_ok=True)
-    fig, axs = plt.subplots(2, 1, figsize=(11.5, 12))
-    fig.subplots_adjust(left=0.42, right=0.94, top=0.96, bottom=0.07, hspace=0.40)
+    fig, axs = plt.subplots(2, 1, figsize=(10, 8.5))
+    fig.subplots_adjust(left=0.50, right=0.86, top=0.93, bottom=0.07, hspace=0.42)
     draw_nb_forest_panel(early_irr_csv, axs[0], "Early developmental window", 0.5, 25)
     draw_nb_forest_panel(late_irr_csv, axs[1], "Late developmental window", 0.5, 25)
-    for ax, label in zip(axs, ["A", "B"]):
-        bbox = ax.get_position()
-        fig.text(0.01, bbox.y1, label, fontsize=18, fontweight="bold", va="top", ha="left")
+    panel_titles = [f"A. Early window (PCA <{PEAK1} weeks)",
+                    f"B. Late window (PCA \u2265{PEAK2} weeks)"]
+    for ax, label in zip(axs, panel_titles):
+        ax.set_title(label, loc="left", x=-1.30, fontsize=12, fontweight="bold", pad=14)
     # A4.32 / Ed E11: tight bbox so the left-hand variable labels are not clipped
     fig.savefig(FIG_DIR / f"{filename_prefix}_{title}.tiff", dpi=300, format="tiff",
                 bbox_inches="tight")
+    fig.savefig(FIG_DIR / f"{filename_prefix}_{title}.pdf", bbox_inches="tight")
     fig.savefig(FIG_DIR / f"{filename_prefix}_{title}.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
 
