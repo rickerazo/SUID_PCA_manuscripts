@@ -299,7 +299,7 @@ def plot_varycoef_curve(input1: pd.DataFrame, title: str, res, design_info: dict
     ax.set_xlim(pca_min - 1, pca_max)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
-    ax.legend(frameon=False)
+    ax.legend(frameon=False, handlelength=3.5)
 
     ax2 = axes[1]
     ratio = np.divide(mu_bs, mu_ns, out=np.full_like(mu_bs, np.nan, dtype=float),
@@ -317,11 +317,9 @@ def plot_varycoef_curve(input1: pd.DataFrame, title: str, res, design_info: dict
     ax2.set_xlim(pca_min - 1, pca_max)
     ax2.spines["top"].set_visible(False)
     ax2.spines["right"].set_visible(False)
-    ax2.legend(frameon=False)
+    ax2.legend(frameon=False, handlelength=3.5)
 
-    for ax_i, panel_label in zip(axes, ["A", "B"]):
-        ax_i.text(0.02, 0.98, panel_label, transform=ax_i.transAxes, va="top",
-                  ha="left", fontsize=14, fontweight="bold")
+    # panel letters are carried by the axes titles
 
     VARYCOEF_FIG_DIR.mkdir(parents=True, exist_ok=True)
     fig.savefig(VARYCOEF_FIG_DIR / f"Figure3b_{title}.png", dpi=300, bbox_inches="tight")

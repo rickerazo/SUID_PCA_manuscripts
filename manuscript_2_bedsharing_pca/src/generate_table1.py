@@ -40,12 +40,12 @@ from ncfrp_manuscript_v5 import load_ncfrp_data, PEAK1, PEAK2
 LOG = logging.getLogger("generate_table1")
 
 # CAUcausedth category labels (NCFRP). Adjust to the codebook if these differ.
-CAUSE_LABELS = {1: "Undetermined", 2: "Accidental suffocation / strangulation",
-                3: "Natural / medical", 4: "Unknown"}
+CAUSE_LABELS = {1: "Undetermined", 2: "Accidental suffocation or strangulation",
+                3: "Natural or medical", 4: "Unknown"}
 
 # Section headings other table scripts omit when that variable is the stratifier.
 SEX_SECTION = "Infant sex"
-BW_SECTION = "Birthweight, g\u1d43"
+BW_SECTION = "Birthweight, g\u1d47"
 BW_COL = "inf3biwt"
 
 
@@ -120,7 +120,7 @@ def build_cohort_table(
         row("No", bs.eq("N"))
 
     if "caucausedth" in data.columns:
-        section("Cause of death category\u1d47")
+        section("Cause of death category\u1d43")
         cau = pd.to_numeric(data["caucausedth"], errors="coerce")
         for code, label in CAUSE_LABELS.items():
             if cau.eq(code).any():          # no all-zero rows
