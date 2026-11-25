@@ -71,12 +71,12 @@ Scripts are listed in run order. All scripts sit in one folder (`src/`) and impo
 - `generate_figure3_gam_curves.py`: Figure 3 (full-curve negative binomial GAM; observed and fitted counts, male minus female difference, log ratio).
 - `run_windowed_nb_models.py`: confirmatory windowed negative binomial regressions; also imported as a library by the scripts below.
 - `generate_figure4_forest_plots.py`: Figure 4 (forest plots of windowed-model IRRs).
-- `generate_supplemental_table23.py`: Supplemental Tables 2 and 3 (IRRs and derived absolute risks by risk-factor profile, early and late windows).
-- `generate_supplemental_table4.py`: Supplemental Table 4 (late-window model estimates).
+- `generate_supplemental_table23.py`: Tables S6 and S7 (IRRs and derived absolute risks by risk-factor profile, early and late windows).
+- `generate_supplemental_table4.py`: Table S2 (late-window model estimates).
 
 **5. Supporting and sensitivity analyses (peer review)**
-- `analyze_peak_postnatal_age.py`: postnatal (chronological) age at death for the 4,438 deaths in the PCA 43 to 46 peak, overall and by preterm status, maternal smoking and sex; Supplemental Tables 5 to 7 and Supplemental Figure 1.
-- `r2_checks.py`: Supplemental Table 1 (early-window estimates with the lower bound at PCA 36 vs 38) with a reproduction check against the main estimate; counts by PCA week, term status and sex for PCA 36 to 46; BFED availability in the denominator; denominator totals.
+- `analyze_peak_postnatal_age.py`: postnatal (chronological) age at death for the 4,438 deaths in the PCA 43 to 46 peak, overall and by preterm status, maternal smoking and sex; Tables S3 to S5 and Figure S1.
+- `r2_checks.py`: Table S1 (early-window estimates with the lower bound at PCA 36 vs 38) with a reproduction check against the main estimate; counts by PCA week, term status and sex for PCA 36 to 46; BFED availability in the denominator; denominator totals.
 - `bfed_sensitivity.py`: breastfeeding sensitivity analysis. Re-runs the whole pipeline separately for infants breastfed (BFED=Y) and not breastfed (BFED=N) at discharge, with offsets from live births with the same breastfeeding status, and compares windowed-model estimates between groups with a Wald test on the difference in log IRRs. Also reruns the full analysis (ALL) and checks that it reproduces the published estimates.
 
 ### Outputs by manuscript item
@@ -89,14 +89,16 @@ Scripts are listed in run order. All scripts sit in one folder (`src/`) and impo
 | Figure 3 | `generate_figure3_gam_curves.py` |
 | Figure 4 | `run_windowed_nb_models.py`, `generate_figure4_forest_plots.py` |
 | Breastfeeding sensitivity analysis (Results) | `bfed_sensitivity.py` |
-| Supplemental Table 1 | `r2_checks.py` |
-| Supplemental Tables 2 and 3 | `generate_supplemental_table23.py` |
-| Supplemental Table 4 | `generate_supplemental_table4.py` |
-| Supplemental Tables 5 to 7, Supplemental Figure 1 | `analyze_peak_postnatal_age.py` |
+| Table S1 (early window, lower bound PCA 36 vs 38) | `r2_checks.py` |
+| Table S2 (late-window model) | `generate_supplemental_table4.py` |
+| Tables S3 to S5 (postnatal age in the peak band by sex, gestational age, smoking), Figure S1 | `analyze_peak_postnatal_age.py` |
+| Tables S6 and S7 (risk-factor profiles, early and late windows) | `generate_supplemental_table23.py` |
+
+Supplementary items are numbered as in the published article (Table S1 to S7, Figure S1). Script names, docstrings and log messages keep the numbering used during peer review: Supplemental Table 1 = S1, 2 = S6, 3 = S7, 4 = S2, 5 = S3, 6 = S4, 7 = S5, Supplemental Figure 1 = Figure S1.
 
 ## Figures
 
-`figures/` holds the figures as submitted: `Figure1.pdf` (case-selection flow diagram), `Figure2.png`, `Figure3.png`, `Figure4.png` and `Supplemental_Figure1.png`. The submission used 300 dpi TIFF versions of Figures 2 to 4, which are not stored here because of their size.
+`figures/` holds the figures as submitted: `Figure1.pdf` (case-selection flow diagram), `Figure2.png`, `Figure3.png`, `Figure4.png` and `Supplemental_Figure1.png` (Figure S1). The submission used 300 dpi TIFF versions of Figures 2 to 4, which are not stored here because of their size.
 
 ## Requirements
 
